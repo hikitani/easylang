@@ -1,0 +1,57 @@
+characters
+
+char = /* any char except newline */.
+newline = `\n` .
+letter = "a" ... "z" | "A" ... "Z" | "_" .
+decimal_digit = "0" ... "9" .
+binary_digit = "0" | "1" .
+
+lexical elements
+
+comment = "#" .
+ident = letter { letter | decimal_digit } .
+ident_list = ident { "," ident } .
+decimal_lit = "0" | ("1" .. "9") { decimal_digit } .
+binary_lit = "0b" { binary_digit } .
+string_lit = `"` { char } `"` .
+int_lit = decimal_lit | binary_lit .
+
+expressions
+
+operand = literal | ident | "(" expr ")" .
+literal = basic_lit | composite_lit .
+
+basic_lit = int_lit | string_lit .
+composite_lit = array_lit | obj_lit .
+
+array_lit = "[" [ arr_elem_list [ "," ] ] "]" .
+arr_elem_list = expr_list .
+
+obj_lit = "{" [ obj_elem_list [ "," ] ] "}" .
+obj_elem_list = kv_elem { "," kv_elem } .
+kv_elem = expr ":" expr .
+
+expr = unary_expr | expr binary_op expr .
+expr_list = expr { "," expr } [ "," ] .
+unary_expr = primary_expr | unary_op unary_expr .
+
+unary_op = "+" | "-" | "not" .
+binary_op = "and" | "or" | rel_op | add_op | mul_op .
+rel_op = "==" | "!=" | "<" | "<=" | ">" | ">=" .
+add_op = "+" | "-" .
+mul_op = "*" | "/" | "%" .
+
+primary_expr = operand | primary_expr selector | primary_expr index | primary_expr args .
+selector = "." ident .
+index = "[" expr_list "]" .
+args = "(" expr_list ")" .
+
+statements
+
+stmt = expr | if_stmt | for_stmt | while_stmt | block | assign_stmt .
+stmt_list = { stmt newline } .
+block = "{" stmt_list "}" .
+if_stmt = "if" expr block [ "else" ( if_stmt | block ) ] .
+for_stmt = "for" ident_list "in" expr block .
+while_stmt = "while" expr block .
+assign_stmt = expr_list "=" expr_list .
