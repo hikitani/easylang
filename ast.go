@@ -79,7 +79,7 @@ type BinaryExpr struct {
 
 type UnaryExpr struct {
 	Node
-	UnaryOp *string `@OpUnary?`
+	UnaryOp *string `@("-" | "not")?`
 	Operand Operand `@@`
 }
 

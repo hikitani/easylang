@@ -177,7 +177,7 @@ func (v *VariantArray) Len() int {
 }
 
 func (v *VariantArray) Get(idx uint64) (Variant, error) {
-	if idx < 0 || idx >= uint64(len(v.v)) {
+	if idx >= uint64(len(v.v)) {
 		return nil, fmt.Errorf("index out of range")
 	}
 
@@ -253,19 +253,10 @@ func (v *VariantObject) Type() VarType {
 }
 
 type VariantFunc struct {
-	expectedArgs int
-	v            func(args []Variant) (Variant, error)
-}
-
-func (v *VariantFunc) ExpectedArgs() int {
-	return v.expectedArgs
+	v func(args []Variant) (Variant, error)
 }
 
 func (v *VariantFunc) Call(args []Variant) (Variant, error) {
-	if v.expectedArgs != len(args) {
-		return nil, fmt.Errorf("expected arguments %d, got %d", v.expectedArgs, len(args))
-	}
-
 	return v.v(args)
 }
 
@@ -275,6 +266,74 @@ func (v *VariantFunc) MemReader() io.Reader {
 
 func (v *VariantFunc) Type() VarType {
 	return TypeFunc
+}
+
+func VariantsIsDeepEqual(lval, rval Variant) bool {
+	if lval.Type() != rval.Type() {
+		return false
+	}
+
+	switch lval.Type() {
+	case TypeNone:
+		return true
+	case TypeBool:
+		lb, rb := MustVariantCast[*VariantBool](lval), MustVariantCast[*VariantBool](rval)
+		return lb.v == rb.v
+	case TypeNum:
+		lnum, rnum := MustVariantCast[*VariantNum](lval), MustVariantCast[*VariantNum](rval)
+		return lnum.v.Cmp(rnum.v) == 0
+	case TypeString:
+		ls, rs := MustVariantCast[*VariantString](lval), MustVariantCast[*VariantString](rval)
+		return ls.v == rs.v
+	case TypeArray:
+		larr, rarr := MustVariantCast[*VariantArray](lval), MustVariantCast[*VariantArray](rval)
+		if len(larr.v) != len(rarr.v) {
+			return false
+		}
+
+		for i := 0; i < len(larr.v); i++ {
+			lv, rv := larr.v[i], rarr.v[i]
+			if !VariantsIsDeepEqual(lv, rv) {
+				return false
+			}
+		}
+
+		return true
+	case TypeObject:
+		lobj, robj := MustVariantCast[*VariantObject](lval), MustVariantCast[*VariantObject](rval)
+		if lobj.v == nil && robj.v == nil {
+			return true
+		}
+
+		var llen, rlen int
+		if lobj.v != nil {
+			llen = len(lobj.v)
+		}
+
+		if robj.v != nil {
+			rlen = len(robj.v)
+		}
+
+		if llen != rlen {
+			return false
+		}
+
+		for k, lv := range lobj.v {
+			rv, ok := robj.v[k]
+			if !ok {
+				return false
+			}
+
+			if !VariantsIsDeepEqual(lv, rv) {
+				return false
+			}
+		}
+
+		return true
+	case TypeFunc:
+		return false
+	}
+	panic("is equal: unknown type " + lval.Type().String())
 }
 
 func VariantsIsEqual(lval, rval Variant) bool {
@@ -318,4 +377,45 @@ func VariantsIsEqual(lval, rval Variant) bool {
 		return false
 	}
 	panic("is equal: unknown type " + lval.Type().String())
+}
+
+func NewVarNone() *VariantNone {
+	return &VariantNone{}
+}
+
+func NewVarBool(v bool) *VariantBool {
+	return &VariantBool{v: v}
+}
+
+func NewVarNum(v *big.Float) *VariantNum {
+	return &VariantNum{v: v}
+}
+
+func NewVarString(v string) *VariantString {
+	return &VariantString{v: v}
+}
+
+func NewVarArray(v []Variant) *VariantArray {
+	return &VariantArray{v: v}
+}
+
+func NewVarObject(v map[string]Variant) *VariantObject {
+	return &VariantObject{v: v}
+}
+
+func NewVarFunc(v func(args []Variant) (Variant, error)) *VariantFunc {
+	return &VariantFunc{v: v}
+}
+
+func NewVarInt[T ~int](v T) *VariantNum {
+	f := new(big.Float).SetInt64(int64(v))
+	return &VariantNum{v: f}
+}
+
+func NewVarFloat[T float32 | float64](v T) *VariantNum {
+	f := new(big.Float).
+		SetPrec(64).
+		SetMode(big.ToNearestEven).
+		SetFloat64(float64(v))
+	return &VariantNum{v: f}
 }

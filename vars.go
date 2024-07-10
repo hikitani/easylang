@@ -1,16 +1,40 @@
 package easylang
 
+type Register uint32
+
+const (
+	RegisterReturn Register = iota
+)
+
+type varmapper struct {
+	m map[string]Register
+	i Register
+}
+
+func (v *varmapper) Register(name string) Register {
+	reg, ok := v.m[name]
+	if ok {
+		return reg
+	}
+
+	v.m[name] = v.i
+	defer func() { v.i++ }()
+	return v.i
+}
+
 type VarScope struct {
-	m map[string]Variant
+	r varmapper
+	m map[Register]Variant
 }
 
 func NewVarScope() *VarScope {
 	return &VarScope{
-		m: map[string]Variant{},
+		r: varmapper{m: map[string]Register{}, i: 1}, // i = 0 reserved for return value
+		m: map[Register]Variant{},
 	}
 }
 
-func (scope *VarScope) setter(name string) (func(v Variant), bool) {
+func (scope *VarScope) setter(name Register) (func(v Variant), bool) {
 	if _, ok := scope.GetVar(name); ok {
 		return func(v Variant) { scope.DefineVar(name, v) }, true
 	}
@@ -19,11 +43,11 @@ func (scope *VarScope) setter(name string) (func(v Variant), bool) {
 }
 
 func (scope *VarScope) SetReturn(v Variant) {
-	scope.DefineVar("@r", v)
+	scope.DefineVar(RegisterReturn, v)
 }
 
 func (scope *VarScope) GetReturn() Variant {
-	v, ok := scope.GetVar("@r")
+	v, ok := scope.GetVar(RegisterReturn)
 	if !ok {
 		return &VariantNone{}
 	}
@@ -31,13 +55,22 @@ func (scope *VarScope) GetReturn() Variant {
 	return v
 }
 
-func (scope *VarScope) GetVar(name string) (Variant, bool) {
-	v, ok := scope.m[name]
+func (scope *VarScope) GetVar(r Register) (Variant, bool) {
+	v, ok := scope.m[r]
 	return v, ok
 }
 
-func (scope *VarScope) DefineVar(name string, value Variant) {
-	scope.m[name] = value
+func (scope *VarScope) VarByName(name string) Variant {
+	r, ok := scope.r.m[name]
+	if !ok {
+		panic("var '" + name + "' not found")
+	}
+
+	return scope.m[r]
+}
+
+func (scope *VarScope) DefineVar(r Register, value Variant) {
+	scope.m[r] = value
 }
 
 type Vars struct {
@@ -48,7 +81,7 @@ type Vars struct {
 	debugChilds []*Vars
 }
 
-func (vars *Vars) setter(name string) (func(v Variant), bool) {
+func (vars *Vars) setter(name Register) (func(v Variant), bool) {
 	for i := len(vars.Locals) - 1; i >= 0; i-- {
 		local := vars.Locals[i]
 
@@ -89,7 +122,7 @@ func (vars *Vars) Unscope() *Vars {
 	}
 }
 
-func (vars *Vars) GetVar(name string) (Variant, bool) {
+func (vars *Vars) GetVar(name Register) (Variant, bool) {
 	for i := len(vars.Locals) - 1; i >= 0; i-- {
 		local := vars.Locals[i]
 
@@ -110,21 +143,29 @@ func (vars *Vars) GetScope(level int) *VarScope {
 	return vars.Locals[level]
 }
 
-func (vars *Vars) DefineGlobalVariable(name string, value Variant) {
-	vars.Global.DefineVar(name, value)
+func (vars *Vars) DefineGlobalVariable(r Register, value Variant) {
+	vars.Global.DefineVar(r, value)
 }
 
-func (vars *Vars) DefineVariable(name string, value Variant) {
+func (vars *Vars) DefineVariable(r Register, value Variant) {
 	if len(vars.Locals) == 0 {
-		vars.Global.DefineVar(name, value)
+		vars.Global.DefineVar(r, value)
 		return
 	}
 
-	vars.LastScope().DefineVar(name, value)
+	vars.LastScope().DefineVar(r, value)
 	return
 }
 
-func (vars *Vars) SetOrDefineVariable(name string, value Variant) {
+func (vars *Vars) Register(name string) Register {
+	if len(vars.Locals) == 0 {
+		return vars.Global.r.Register(name)
+	}
+
+	return vars.LastScope().r.Register(name)
+}
+
+func (vars *Vars) SetOrDefineVariable(name Register, value Variant) {
 	if setter, ok := vars.setter(name); ok {
 		setter(value)
 		return

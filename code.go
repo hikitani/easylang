@@ -1,7 +1,6 @@
 package easylang
 
 import (
-	"container/list"
 	"errors"
 	"fmt"
 	"io"
@@ -54,13 +53,13 @@ type BasicLitCodeGen struct{}
 func (ec *BasicLitCodeGen) CodeGen(node *BasicLit) (ExprEvaler, error) {
 	if v := node.Number; v != nil {
 		num := &big.Float{}
-		_, _, err := num.Parse(*v, 10)
+		_, _, err := num.Parse(*v, 0)
 		if err != nil {
 			return nil, fmt.Errorf("bad parser: failed to parse number, %w", err)
 		}
 
 		return evaler(func() (Variant, error) {
-			return &VariantNum{v: num}, nil
+			return NewVarNum(num), nil
 		}), nil
 	}
 
@@ -141,9 +140,8 @@ func (ec *BasicLitCodeGen) CodeGen(node *BasicLit) (ExprEvaler, error) {
 			atEsc = false
 		}
 
-		resVal := string(runes)
 		return evaler(func() (Variant, error) {
-			return &VariantString{v: resVal}, nil
+			return NewVarString(string(runes)), nil
 		}), nil
 	}
 
@@ -164,7 +162,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 
 		if len(elems.X) == 0 {
 			return evaler(func() (Variant, error) {
-				return &VariantArray{}, nil
+				return NewVarArray(nil), nil
 			}), nil
 		}
 
@@ -183,9 +181,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (Variant, error) {
-			arr := VariantArray{
-				v: make([]Variant, 0, len(evals)),
-			}
+			arr := NewVarArray(make([]Variant, 0, len(evals)))
 			for i, eval := range evals {
 				v, err := eval.Eval()
 				if err != nil {
@@ -194,7 +190,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 				arr.v = append(arr.v, v)
 			}
 
-			return &arr, nil
+			return arr, nil
 		}), nil
 	}
 
@@ -206,7 +202,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 
 		if len(items.X) == 0 {
 			return evaler(func() (Variant, error) {
-				return &VariantObject{}, nil
+				return NewVarObject(map[string]Variant{}), nil
 			}), nil
 		}
 
@@ -230,9 +226,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (Variant, error) {
-			obj := VariantObject{
-				v: make(map[string]Variant, len(kvEvals)),
-			}
+			obj := NewVarObject(make(map[string]Variant, len(kvEvals)))
 			for i, kv := range kvEvals {
 				keyEval, valEval := kv[0], kv[1]
 				key, err := keyEval.Eval()
@@ -253,7 +247,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 				obj.v[string(kb)] = val
 			}
 
-			return &obj, nil
+			return obj, nil
 		}), nil
 	}
 
@@ -296,15 +290,15 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 			switch name {
 			case ConstValueNone:
 				return evaler(func() (Variant, error) {
-					return &VariantNone{}, nil
+					return NewVarNone(), nil
 				}), nil
 			case ConstValueTrue:
 				return evaler(func() (Variant, error) {
-					return &VariantBool{v: true}, nil
+					return NewVarBool(true), nil
 				}), nil
 			case ConstValueFalse:
 				return evaler(func() (Variant, error) {
-					return &VariantBool{v: false}, nil
+					return NewVarBool(false), nil
 				}), nil
 			}
 
@@ -315,8 +309,10 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 			return nil, fmt.Errorf("bad variable: name %s is keyword", name)
 		}
 
+		variable := c.exprGen.vars.Register(name)
+
 		eval = evaler(func() (Variant, error) {
-			v, ok := c.exprGen.vars.GetVar(name)
+			v, ok := c.exprGen.vars.GetVar(variable)
 			if !ok {
 				return nil, fmt.Errorf("variable %s not defined", name)
 			}
@@ -574,7 +570,7 @@ func (c *UnaryExprCodeGen) CodeGen(node *UnaryExpr) (ExprEvaler, error) {
 			}
 
 			num := MustVariantCast[*VariantNum](v)
-			return &VariantNum{v: new(big.Float).Neg(num.v)}, nil
+			return NewVarNum(new(big.Float).Neg(num.v)), nil
 		}), nil
 	case "not":
 		return evaler(func() (Variant, error) {
@@ -588,7 +584,7 @@ func (c *UnaryExprCodeGen) CodeGen(node *UnaryExpr) (ExprEvaler, error) {
 			}
 
 			b := MustVariantCast[*VariantBool](v)
-			return &VariantBool{v: !b.v}, nil
+			return NewVarBool(!b.v), nil
 		}), nil
 	}
 
@@ -615,14 +611,22 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		return nil, errors.New("bad function: argument names must be unique")
 	}
 
-	prefngen := func(vars *Vars) func(vargs []Variant) error {
+	regs := func(vars *Vars) []Register {
+		var res []Register
+		for _, arg := range args.X {
+			res = append(res, vars.Register(arg.Name))
+		}
+		return res
+	}
+
+	prefngen := func(vars *Vars, regs []Register) func(vargs []Variant) error {
 		return func(vargs []Variant) error {
 			if len(vargs) != len(args.X) {
 				return fmt.Errorf("expected arguments %d, got %d", len(args.X), len(vargs))
 			}
 
 			for i := 0; i < len(vargs); i++ {
-				vars.DefineVariable(args.X[i].Name, vargs[i])
+				vars.DefineVariable(regs[i], vargs[i])
 			}
 
 			return nil
@@ -632,7 +636,7 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 	switch {
 	case node.Expr != nil:
 		vars := c.exprGen.vars
-		prefn := prefngen(vars)
+		prefn := prefngen(vars, regs(vars))
 
 		eval, err := c.exprGen.CodeGen(node.Expr)
 		if err != nil {
@@ -640,20 +644,17 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (Variant, error) {
-			return &VariantFunc{
-				expectedArgs: len(args.X),
-				v: func(vargs []Variant) (Variant, error) {
-					if err := prefn(vargs); err != nil {
-						return nil, err
-					}
+			return NewVarFunc(func(vargs []Variant) (Variant, error) {
+				if err := prefn(vargs); err != nil {
+					return nil, err
+				}
 
-					return eval.Eval()
-				},
-			}, nil
+				return eval.Eval()
+			}), nil
 		}), nil
 	case node.Block != nil:
 		vars := c.blkGen.vars
-		prefn := prefngen(vars)
+		prefn := prefngen(vars, regs(vars))
 
 		invoker, err := c.blkGen.CodeGen(node.Block)
 		if err != nil {
@@ -661,21 +662,18 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (Variant, error) {
-			return &VariantFunc{
-				expectedArgs: len(args.X),
-				v: func(vargs []Variant) (Variant, error) {
-					if err := prefn(vargs); err != nil {
-						return nil, err
-					}
+			return NewVarFunc(func(vargs []Variant) (Variant, error) {
+				if err := prefn(vargs); err != nil {
+					return nil, err
+				}
 
-					err := invoker.Invoke()
-					if err != nil && !errors.Is(err, ErrStmtFinished) {
-						return nil, err
-					}
+				err := invoker.Invoke()
+				if err != nil && !errors.Is(err, ErrStmtFinished) {
+					return nil, err
+				}
 
-					return vars.LastScope().GetReturn(), nil
-				},
-			}, nil
+				return vars.LastScope().GetReturn(), nil
+			}), nil
 		}), nil
 	}
 
@@ -758,38 +756,44 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 		return ops[i].prior > ops[j].prior
 	})
 
-	copyEvals := func() []ExprEvaler {
-		newEvals := make([]ExprEvaler, len(evals))
-		copy(newEvals, evals)
-		return newEvals
-	}
-
-	return evaler(func() (Variant, error) {
-		evals := copyEvals()
-		stack := list.New()
-		getVal := func(eval ExprEvaler) (val Variant, err error) {
-			if eval == nil {
-				front := stack.Front()
-				return stack.Remove(front).(Variant), nil
-			}
-
-			val, err = eval.Eval()
-			if err != nil {
-				return nil, fmt.Errorf("cannot evaluate expression: %w", err)
-			}
-			return
+	getVal := func(eval ExprEvaler, stack *[]Variant) (val Variant, err error) {
+		if eval == nil {
+			front := (*stack)[0]
+			*stack = (*stack)[1:]
+			return front, nil
 		}
 
+		val, err = eval.Eval()
+		if err != nil {
+			return nil, fmt.Errorf("cannot evaluate expression: %w", err)
+		}
+		return
+	}
+
+	stackCap := (len(ops) + 1) / 2
+	return evaler(func() (Variant, error) {
+		evalMask := make([]bool, len(evals))
+		stack := make([]Variant, 0, stackCap)
+
+		var leval, reval ExprEvaler
 		for _, opinfo := range ops {
 			i := opinfo.origPos
-			leval, reval := evals[i], evals[i+1]
-			evals[i], evals[i+1] = nil, nil
-			rval, err := getVal(reval)
+			if !evalMask[i] {
+				leval = evals[i]
+			}
+
+			if !evalMask[i+1] {
+				reval = evals[i+1]
+			}
+
+			evalMask[i], evalMask[i+1] = true, true
+
+			rval, err := getVal(reval, &stack)
 			if err != nil {
 				return nil, err
 			}
 
-			lval, err := getVal(leval)
+			lval, err := getVal(leval, &stack)
 			if err != nil {
 				return nil, err
 			}
@@ -799,17 +803,17 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 				return nil, err
 			}
 
-			stack.PushBack(res)
+			stack = append(stack, res)
 		}
 
-		return stack.Remove(stack.Front()).(Variant), nil
+		return stack[0], nil
 	}), nil
 }
 
 func evalBinary(op string, lval, rval Variant) (Variant, error) {
 	if op == "+" && rval.Type() == TypeString && lval.Type() == TypeString {
 		rs, ls := MustVariantCast[*VariantString](rval), MustVariantCast[*VariantString](lval)
-		return &VariantString{v: ls.v + rs.v}, nil
+		return NewVarString(ls.v + rs.v), nil
 	}
 
 	if op == "+" && rval.Type() == TypeArray && lval.Type() == TypeArray {
@@ -817,7 +821,7 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 		arr := make([]Variant, 0, len(rs.v)+len(ls.v))
 		arr = append(arr, ls.v...)
 		arr = append(arr, rs.v...)
-		return &VariantArray{v: arr}, nil
+		return NewVarArray(arr), nil
 	}
 
 	if IsCmpOp(op) {
@@ -854,7 +858,7 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 			return nil, fmt.Errorf("unknown operation '%s %s %s'", lval.Type(), op, rval.Type())
 		}
 
-		return &VariantBool{v: b}, nil
+		return NewVarBool(b), nil
 	}
 
 	if IsArithOp(op) {
@@ -884,7 +888,7 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 			return nil, fmt.Errorf("unknown operation 'number %s number'", op)
 		}
 
-		return &VariantNum{v: num}, nil
+		return NewVarNum(num), nil
 	}
 
 	if IsPredicateOp(op) {
@@ -901,7 +905,7 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 		default:
 			return nil, fmt.Errorf("unknown operation 'bool %s bool'", op)
 		}
-		return &VariantBool{v: b}, nil
+		return NewVarBool(b), nil
 	}
 
 	return nil, fmt.Errorf("unknown operation '%s %s %s'", lval.Type(), op, rval.Type())
@@ -981,13 +985,15 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("invalid rhs operand: %w", err)
 	}
 
+	reg := c.exprGen.vars.Register(name)
+
 	return invoker(func() error {
 		v, err := reval.Eval()
 		if err != nil {
 			return err
 		}
 
-		c.exprGen.vars.SetOrDefineVariable(name, v)
+		c.exprGen.vars.SetOrDefineVariable(reg, v)
 		return nil
 	}), nil
 }
@@ -1078,6 +1084,9 @@ func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
 	blkInvoker, err := (&BlockStmtCodeGen{
 		vars: c.vars.WithScope(),
 	}).CodeGen(&node.Block)
+	if err != nil {
+		return nil, fmt.Errorf("invalid while block statement: %w", err)
+	}
 
 	return invoker(func() error {
 		for {
@@ -1127,6 +1136,33 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("bad for statement: invalid block statement: %w", err)
 	}
 
+	iterArr := func(i int, el Variant) {}
+	iterObj := func(k string, el Variant) {}
+	switch len(varnames.X) {
+	case 0:
+	case 1:
+		r1 := blkVars.Register(varnames.X[0].Name)
+		iterArr = func(i int, _ Variant) {
+			blkVars.DefineVariable(r1, NewVarNum(big.NewFloat(float64(i))))
+		}
+		iterObj = func(k string, _ Variant) {
+			blkVars.DefineVariable(r1, NewVarString(k))
+		}
+	case 2:
+		r1 := blkVars.Register(varnames.X[0].Name)
+		r2 := blkVars.Register(varnames.X[1].Name)
+		iterArr = func(i int, el Variant) {
+			blkVars.DefineVariable(r1, NewVarNum(big.NewFloat(float64(i))))
+			blkVars.DefineVariable(r2, el)
+		}
+		iterObj = func(k string, el Variant) {
+			blkVars.DefineVariable(r1, NewVarString(k))
+			blkVars.DefineVariable(r2, el)
+		}
+	default:
+		panic("unreachable")
+	}
+
 	return invoker(func() error {
 		v, err := overEval.Eval()
 		if err != nil {
@@ -1141,18 +1177,7 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 			}
 
 			for i, el := range arr.v {
-				switch len(varnames.X) {
-				case 0:
-				case 1:
-					blkVars.DefineVariable(varnames.X[0].Name, el)
-				case 2:
-					idx := &VariantNum{v: big.NewFloat(float64(i))}
-					blkVars.DefineVariable(varnames.X[0].Name, idx)
-					blkVars.DefineVariable(varnames.X[1].Name, el)
-				default:
-					panic("unreachable")
-				}
-
+				iterArr(i, el)
 				if err := blkInvoker.Invoke(); err != nil {
 					return err
 				}
@@ -1164,17 +1189,7 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 			}
 
 			for k, v := range obj.v {
-				switch len(varnames.X) {
-				case 0:
-				case 1:
-					blkVars.DefineVariable(varnames.X[0].Name, &VariantString{v: k})
-				case 2:
-					blkVars.DefineVariable(varnames.X[0].Name, &VariantString{v: k})
-					blkVars.DefineVariable(varnames.X[0].Name, v)
-				default:
-					panic("unreachable")
-				}
-
+				iterObj(k, v)
 				if err := blkInvoker.Invoke(); err != nil {
 					return err
 				}
