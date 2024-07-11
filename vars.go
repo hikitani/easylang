@@ -69,13 +69,19 @@ func (scope *VarScope) VarByName(name string) Variant {
 	return scope.m[r]
 }
 
+func (scope *VarScope) LookupRegister(name string) (Register, bool) {
+	r, ok := scope.r.m[name]
+	return r, ok
+}
+
 func (scope *VarScope) DefineVar(r Register, value Variant) {
 	scope.m[r] = value
 }
 
 type Vars struct {
-	Global *VarScope
-	Locals []*VarScope
+	Global           *VarScope
+	Locals           []*VarScope
+	ParentBlockScope *VarScope
 
 	debug       bool
 	debugChilds []*Vars
@@ -98,8 +104,9 @@ func (vars *Vars) WithScope() *Vars {
 	copy(locals, vars.Locals)
 	locals[len(locals)-1] = NewVarScope()
 	child := &Vars{
-		Global: vars.Global,
-		Locals: locals,
+		Global:           vars.Global,
+		Locals:           locals,
+		ParentBlockScope: vars.ParentBlockScope,
 	}
 
 	if vars.debug {
@@ -120,6 +127,15 @@ func (vars *Vars) Unscope() *Vars {
 		Global: vars.Global,
 		Locals: locals,
 	}
+}
+
+func (vars *Vars) SetReturn(v Variant) {
+	if vars.ParentBlockScope != nil {
+		vars.ParentBlockScope.SetReturn(v)
+		return
+	}
+
+	vars.LastScope().SetReturn(v)
 }
 
 func (vars *Vars) GetVar(name Register) (Variant, bool) {
@@ -154,15 +170,21 @@ func (vars *Vars) DefineVariable(r Register, value Variant) {
 	}
 
 	vars.LastScope().DefineVar(r, value)
-	return
 }
 
-func (vars *Vars) Register(name string) Register {
+func (vars *Vars) Register(name string) (*VarScope, Register) {
 	if len(vars.Locals) == 0 {
-		return vars.Global.r.Register(name)
+		return vars.Global, vars.Global.r.Register(name)
 	}
 
-	return vars.LastScope().r.Register(name)
+	for _, scope := range vars.Locals {
+		r, ok := scope.LookupRegister(name)
+		if ok {
+			return scope, r
+		}
+	}
+
+	return vars.LastScope(), vars.LastScope().r.Register(name)
 }
 
 func (vars *Vars) SetOrDefineVariable(name Register, value Variant) {

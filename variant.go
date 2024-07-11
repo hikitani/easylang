@@ -309,6 +309,12 @@ func (v *VariantFunc) Type() VarType {
 }
 
 func VariantsIsDeepEqual(lval, rval Variant) bool {
+	if lval == nil {
+		return rval == nil
+	} else if rval == nil {
+		return false
+	}
+
 	if lval.Type() != rval.Type() {
 		return false
 	}

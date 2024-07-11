@@ -262,12 +262,14 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 	switch {
 	case node.Func != nil:
 		vars := c.exprGen.vars.WithScope()
+		vars.ParentBlockScope = vars.LastScope()
 		eval, err = (&FuncExprCodeGen{
 			exprGen: &ExprCodeGen{vars: vars},
 			blkGen:  &BlockStmtCodeGen{vars: vars},
 		}).CodeGen(node.Func)
 	case node.Block != nil:
 		vars := c.exprGen.vars.WithScope()
+		vars.ParentBlockScope = vars.LastScope()
 		eval, err = (&BlockExprCodeGen{
 			blkGen: &BlockStmtCodeGen{vars: vars},
 		}).CodeGen(node.Block)
@@ -313,10 +315,10 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 			return nil, fmt.Errorf("bad variable: name %s is keyword", name)
 		}
 
-		variable := c.exprGen.vars.Register(name)
+		scope, reg := c.exprGen.vars.Register(name)
 
 		eval = evaler(func() (Variant, error) {
-			v, ok := c.exprGen.vars.GetVar(variable)
+			v, ok := scope.GetVar(reg)
 			if !ok {
 				return nil, fmt.Errorf("variable %s not defined", name)
 			}
@@ -633,22 +635,30 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		return nil, errors.New("bad function: argument names must be unique")
 	}
 
-	regs := func(vars *Vars) []Register {
-		var res []Register
+	type ScopeAndReg struct {
+		Scope *VarScope
+		Reg   Register
+	}
+	regs := func(vars *Vars) []ScopeAndReg {
+		var res []ScopeAndReg
 		for _, arg := range args.X {
-			res = append(res, vars.Register(arg.Name))
+			scope, reg := vars.Register(arg.Name)
+			res = append(res, ScopeAndReg{
+				Scope: scope,
+				Reg:   reg,
+			})
 		}
 		return res
 	}
 
-	prefngen := func(vars *Vars, regs []Register) func(vargs []Variant) error {
+	prefngen := func(regs []ScopeAndReg) func(vargs []Variant) error {
 		return func(vargs []Variant) error {
 			if len(vargs) != len(args.X) {
 				return fmt.Errorf("expected arguments %d, got %d", len(args.X), len(vargs))
 			}
 
 			for i := 0; i < len(vargs); i++ {
-				vars.DefineVariable(regs[i], vargs[i])
+				regs[i].Scope.DefineVar(regs[i].Reg, vargs[i])
 			}
 
 			return nil
@@ -658,7 +668,7 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 	switch {
 	case node.Expr != nil:
 		vars := c.exprGen.vars
-		prefn := prefngen(vars, regs(vars))
+		prefn := prefngen(regs(vars))
 
 		eval, err := c.exprGen.CodeGen(node.Expr)
 		if err != nil {
@@ -676,7 +686,7 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		}), nil
 	case node.Block != nil:
 		vars := c.blkGen.vars
-		prefn := prefngen(vars, regs(vars))
+		prefn := prefngen(regs(vars))
 
 		invoker, err := c.blkGen.CodeGen(node.Block)
 		if err != nil {
@@ -768,8 +778,11 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 
 	getVal := func(eval ExprEvaler, stack *[]Variant) (val Variant, err error) {
 		if eval == nil {
-			front := (*stack)[0]
-			*stack = (*stack)[1:]
+			// front := (*stack)[0]
+			// *stack = (*stack)[1:]
+
+			front := (*stack)[len(*stack)-1]
+			*stack = (*stack)[:len(*stack)-1]
 			return front, nil
 		}
 
@@ -790,10 +803,14 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 			i := opinfo.origPos
 			if !evalMask[i] {
 				leval = evals[i]
+			} else {
+				leval = nil
 			}
 
 			if !evalMask[i+1] {
 				reval = evals[i+1]
+			} else {
+				reval = nil
 			}
 
 			evalMask[i], evalMask[i+1] = true, true
@@ -902,14 +919,18 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 			}
 			num.Mul(lnum.v, rnum.v)
 		case "%":
+			if rnum.v.IsInf() {
+				return nil, errors.New("op '%': modulus with inf")
+			}
+
+			if rnum.IsZero() {
+				return nil, errors.New("op '%': modulus with zero")
+			}
+
 			if lnum.v.IsInt() && rnum.v.IsInt() {
 				var x, y big.Int
 				lnum.v.Int(&x)
 				rnum.v.Int(&y)
-				if len(y.Bits()) == 0 {
-					return nil, errors.New("op '%': division by zero")
-				}
-
 				num.SetInt(x.Mod(&x, &y))
 			} else if div := new(big.Float).Quo(lnum.v, rnum.v); div.IsInf() {
 				num.Set(div)
@@ -923,6 +944,14 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 				mul := new(big.Float).Mul(div.SetInt(divInt), rnum.v)
 				// 3. x - int(div) * y
 				num.Sub(lnum.v, mul)
+
+				if lnum.Sign() < 0 {
+					if rnum.Sign() > 0 {
+						num.Add(rnum.v, num)
+					} else {
+						num.Add(mul.Neg(rnum.v), num)
+					}
+				}
 			}
 		default:
 			return nil, fmt.Errorf("unknown operation 'number %s number'", op)
@@ -961,7 +990,7 @@ type ReturnStmtCodeGen struct {
 
 func (c *ReturnStmtCodeGen) CodeGen(node *ReturnStmt) (StmtInvoker, error) {
 	ret := func(v Variant) error {
-		c.vars.LastScope().SetReturn(v)
+		c.vars.SetReturn(v)
 		return ErrStmtFinished
 	}
 	if node.ReturnExpr == nil {
@@ -1025,7 +1054,7 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("invalid rhs operand: %w", err)
 	}
 
-	reg := c.exprGen.vars.Register(name)
+	scope, reg := c.exprGen.vars.Register(name)
 
 	return invoker(func() error {
 		v, err := reval.Eval()
@@ -1033,7 +1062,7 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 			return err
 		}
 
-		c.exprGen.vars.SetOrDefineVariable(reg, v)
+		scope.DefineVar(reg, v)
 		return nil
 	}), nil
 }
@@ -1121,8 +1150,9 @@ func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("invalid while condition expression: %w", err)
 	}
 
+	vars := c.vars.WithScope()
 	blkInvoker, err := (&BlockStmtCodeGen{
-		vars: c.vars.WithScope(),
+		vars: vars,
 	}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("invalid while block statement: %w", err)
@@ -1181,23 +1211,23 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 	switch len(varnames.X) {
 	case 0:
 	case 1:
-		r1 := blkVars.Register(varnames.X[0].Name)
+		s1, r1 := blkVars.Register(varnames.X[0].Name)
 		iterArr = func(i int, _ Variant) {
-			blkVars.DefineVariable(r1, NewVarNum(big.NewFloat(float64(i))))
+			s1.DefineVar(r1, NewVarNum(big.NewFloat(float64(i))))
 		}
 		iterObj = func(k string, _ Variant) {
 			blkVars.DefineVariable(r1, NewVarString(k))
 		}
 	case 2:
-		r1 := blkVars.Register(varnames.X[0].Name)
-		r2 := blkVars.Register(varnames.X[1].Name)
+		s1, r1 := blkVars.Register(varnames.X[0].Name)
+		s2, r2 := blkVars.Register(varnames.X[1].Name)
 		iterArr = func(i int, el Variant) {
-			blkVars.DefineVariable(r1, NewVarNum(big.NewFloat(float64(i))))
-			blkVars.DefineVariable(r2, el)
+			s1.DefineVar(r1, NewVarNum(big.NewFloat(float64(i))))
+			s2.DefineVar(r2, el)
 		}
 		iterObj = func(k string, el Variant) {
-			blkVars.DefineVariable(r1, NewVarString(k))
-			blkVars.DefineVariable(r2, el)
+			s1.DefineVar(r1, NewVarString(k))
+			s2.DefineVar(r2, el)
 		}
 	default:
 		panic("unreachable")

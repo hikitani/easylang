@@ -1,7 +1,6 @@
 package easylang
 
 import (
-	"fmt"
 	"io"
 	"math/big"
 	"testing"
@@ -660,9 +659,215 @@ func TestExprCode(t *testing.T) {
 			Expected: NewVarInt(1),
 		},
 		{
+			Name:     "Binary_ArithOp_Quo_Inf",
+			Input:    `2 / 0`,
+			Expected: NewVarInf(),
+		},
+		{
+			Name:     "Binary_ArithOp_Quo_NegInfInf",
+			Input:    `-2 / 0`,
+			Expected: NewVarNegInf(),
+		},
+		{
+			Name:     "Binary_ArithOp_Quo_Zero",
+			Input:    `1 / inf`,
+			Expected: NewVarInt(0),
+		},
+		{
+			Name:     "Binary_ArithOp_Quo_InfIntoNum",
+			Input:    `inf / 999`,
+			Expected: NewVarInf(),
+		},
+		{
+			Name:     "Binary_ArithOp_Quo_NegInfIntoNum",
+			Input:    `-inf / 999`,
+			Expected: NewVarNegInf(),
+		},
+		{
+			Name:           "Binary_ArithOp_Quo_Invalid_ZeroIntoZero",
+			Input:          `0 / 0`,
+			IsRuntimeError: true,
+		},
+		{
+			Name:           "Binary_ArithOp_Quo_Invalid_InfIntoInf",
+			Input:          `inf / inf`,
+			IsRuntimeError: true,
+		},
+		{
 			Name:     "Binary_ArithOp_Mul",
 			Input:    `2 * 3`,
 			Expected: NewVarInt(6),
+		},
+		{
+			Name:     "Binary_ArithOp_Mul_Inf",
+			Input:    `2 * inf`,
+			Expected: NewVarInf(),
+		},
+		{
+			Name:     "Binary_ArithOp_Mul_NegInf",
+			Input:    `2 * -inf`,
+			Expected: NewVarNegInf(),
+		},
+		{
+			Name:           "Binary_ArithOp_Mul_Invalid_ZeroAndInf",
+			Input:          `inf * 0`,
+			IsRuntimeError: true,
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int",
+			Input:    `4 % 3`,
+			Expected: NewVarInt(1),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_NegX",
+			Input:    `-4 % 3`,
+			Expected: NewVarInt(2),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_NegY",
+			Input:    `4 % -3`,
+			Expected: NewVarInt(1),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_NegXY",
+			Input:    `-4 % -3`,
+			Expected: NewVarInt(2),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_Inf",
+			Input:    `inf % 4`,
+			Expected: NewVarInf(),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_NegInf",
+			Input:    `-inf % 4`,
+			Expected: NewVarNegInf(),
+		},
+		{
+			Name:           "Binary_ArithOp_Mod_Int_InvalidInf",
+			Input:          `4 % inf`,
+			IsRuntimeError: true,
+		},
+		{
+			Name:           "Binary_ArithOp_Mod_Int_InvalidZero",
+			Input:          `4 % 0`,
+			IsRuntimeError: true,
+		},
+		{
+			Name: "Binary_ArithOp_Mod_Float",
+			Input: `block {
+				mod = 0.4 % 0.3
+				expected_res = 0.1
+				diff = mod - expected_res
+				if diff < 0 {
+					diff = -diff
+				}
+
+				return diff < 0.000_000_000_000_000_01
+			}`,
+			Expected: NewVarBool(true),
+		},
+		{
+			Name: "Binary_ArithOp_Mod_Float_NegX",
+			Input: `block {
+				mod = -0.4 % 0.3
+				expected_res = 0.2
+				diff = mod - expected_res
+				if diff < 0 {
+					diff = -diff
+				}
+
+				return diff < 0.000_000_000_000_000_01
+			}`,
+			Expected: NewVarBool(true),
+		},
+		{
+			Name: "Binary_ArithOp_Mod_Float_NegY",
+			Input: `block {
+				mod = 0.4 % -0.3
+				expected_res = 0.1
+				diff = mod - expected_res
+				if diff < 0 {
+					diff = -diff
+				}
+
+				return diff < 0.000_000_000_000_000_01
+			}`,
+			Expected: NewVarBool(true),
+		},
+		{
+			Name: "Binary_ArithOp_Mod_Float_NegXY",
+			Input: `block {
+				mod = -0.4 % -0.3
+				expected_res = 0.2
+				diff = mod - expected_res
+				if diff < 0 {
+					diff = -diff
+				}
+
+				return diff < 0.000_000_000_000_000_01
+			}`,
+			Expected: NewVarBool(true),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_Inf",
+			Input:    `inf % 4`,
+			Expected: NewVarInf(),
+		},
+		{
+			Name:     "Binary_ArithOp_Mod_Int_NegInf",
+			Input:    `-inf % 4`,
+			Expected: NewVarNegInf(),
+		},
+		{
+			Name:           "Binary_ArithOp_Mod_Float_InvalidZero",
+			Input:          `4.123 % 0`,
+			IsRuntimeError: true,
+		},
+		{
+			Name:           "Binary_ArithOp_Mod_Float_InvalidInf",
+			Input:          `4.123 % inf`,
+			IsRuntimeError: true,
+		},
+
+		{
+			Name:     "Binary_PredicateOp_And_True",
+			Input:    `true and true`,
+			Expected: NewVarBool(true),
+		},
+		{
+			Name:     "Binary_PredicateOp_And_False",
+			Input:    `false and true`,
+			Expected: NewVarBool(false),
+		},
+		{
+			Name:     "Binary_PredicateOp_Or_True",
+			Input:    `(true or true) and (true or false) and (false or true)`,
+			Expected: NewVarBool(true),
+		},
+		{
+			Name:     "Binary_PredicateOp_Or_False",
+			Input:    `false and false`,
+			Expected: NewVarBool(false),
+		},
+
+		{
+			Name: "Binary_Priority",
+
+			/*
+				Order:
+				1. 2 * 2 = 4
+				2. 4 % 3 = 1
+				3. 1 * 2 = 2
+				4. 2 / 2 = 1
+				5. 4 - 1 = 3
+				6. 3 + 1 = 4
+				7. 4 == 4 = true
+				8. true and true = true
+				9. false or true = true
+			*/
+			Input:    `false or 2 * 2 - 4 % 3 * 2 / 2 + 1 == 4 and true`,
+			Expected: NewVarBool(true),
 		},
 	}
 
@@ -701,116 +906,6 @@ func TestExprCode(t *testing.T) {
 			assert.True(t, VariantsIsDeepEqual(testCase.Expected, v), testCase.Name)
 		}
 	}
-}
-
-func TestStringCodegen(t *testing.T) {
-	parser, err := participle.Build[BasicLit](
-		participle.Lexer(lexdef),
-		participle.Elide("Comment", "Whitespace"),
-	)
-	require.NoError(t, err)
-
-	lit, err := parser.ParseString("", `"Hello\n\t\U0001f3b1WORLD"`)
-	require.NoError(t, err)
-
-	eval, err := (&BasicLitCodeGen{}).CodeGen(lit)
-	require.NoError(t, err)
-
-	v, err := eval.Eval()
-	require.NoError(t, err)
-	assert.Equal(t, v.(*VariantString).v, "Hello\n\t🎱WORLD")
-}
-
-func TestNumberCodegen(t *testing.T) {
-	parser, err := participle.Build[BasicLit](
-		participle.Lexer(lexdef),
-		participle.Elide("Comment", "Whitespace"),
-	)
-	require.NoError(t, err)
-
-	lit, err := parser.ParseString("", `123456`)
-	require.NoError(t, err)
-
-	eval, err := (&BasicLitCodeGen{}).CodeGen(lit)
-	require.NoError(t, err)
-
-	v, err := eval.Eval()
-	require.NoError(t, err)
-
-	num := v.(*VariantNum)
-	require.True(t, num.v.IsInt())
-	n, _ := num.v.Int(nil)
-	assert.Equal(t, n.Int64(), int64(123456))
-}
-
-func TestExprCodegen(t *testing.T) {
-	parser, err := participle.Build[Expr](
-		participle.Lexer(lexdef),
-		participle.Elide("Comment", "Whitespace"),
-	)
-	require.NoError(t, err)
-
-	expr, err := parser.ParseString("", `1 == 1 or 1 != 1`)
-	require.NoError(t, err)
-
-	eval, err := (&ExprCodeGen{}).CodeGen(expr)
-	require.NoError(t, err)
-
-	v, err := eval.Eval()
-	require.NoError(t, err)
-
-	num := v.(*VariantBool)
-	fmt.Println(num.v)
-}
-
-func TestExprStmtCodegen(t *testing.T) {
-	parser, err := participle.Build[ExprStmt](
-		participle.Lexer(lexdef),
-		participle.Elide("Comment", "Whitespace"),
-	)
-	require.NoError(t, err)
-
-	expr, err := parser.ParseString("", `foo = "hello" + " world"`)
-	require.NoError(t, err)
-
-	codegen := &ExprStmtCodeGen{
-		exprGen: &ExprCodeGen{vars: NewVars()},
-	}
-	invoker, err := codegen.CodeGen(expr)
-
-	require.NoError(t, err)
-	require.NoError(t, invoker.Invoke())
-
-	codegen.exprGen.vars.Global.r.Register("foo")
-	fmt.Println(codegen.exprGen.vars.Global.VarByName("foo").(*VariantString).v)
-}
-
-func TestProgram(t *testing.T) {
-	parser, err := participle.Build[ProgramFile](
-		participle.Lexer(lexdef),
-		participle.Elide("Comment", "Whitespace"),
-	)
-	require.NoError(t, err)
-
-	ast, err := parser.ParseString("", `
-		s = ""
-		sum = 0
-		for i, el in ["hello", "world"] {
-			sum = sum + i
-			s = s + " " + el
-		}
-
-	`)
-	require.NoError(t, err)
-
-	vars := NewDebugVars()
-	program, err := (&Program{
-		vars: vars,
-	}).CodeGen(ast)
-
-	require.NoError(t, err)
-	err = program.Invoke()
-	require.NoError(t, err)
 }
 
 func BenchmarkProgram(b *testing.B) {

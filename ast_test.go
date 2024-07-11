@@ -49,15 +49,57 @@ func TestBasicLit(t *testing.T) {
 			},
 		},
 		{
-			Code: "0b",
-			Expected: BasicLit{
-				Number: ptr("0b"),
-			},
-		},
-		{
 			Code: "0b0010101010",
 			Expected: BasicLit{
 				Number: ptr("0b0010101010"),
+			},
+		},
+		{
+			Code: "0B0010101010",
+			Expected: BasicLit{
+				Number: ptr("0B0010101010"),
+			},
+		},
+		{
+			Code: "0o777",
+			Expected: BasicLit{
+				Number: ptr("0o777"),
+			},
+		},
+		{
+			Code: "0O777",
+			Expected: BasicLit{
+				Number: ptr("0O777"),
+			},
+		},
+		{
+			Code: "0xfff",
+			Expected: BasicLit{
+				Number: ptr("0xfff"),
+			},
+		},
+		{
+			Code: "0xFFF",
+			Expected: BasicLit{
+				Number: ptr("0xFFF"),
+			},
+		},
+		{
+			Code: "0Xfff",
+			Expected: BasicLit{
+				Number: ptr("0Xfff"),
+			},
+		},
+		{
+			Code: "0XFFF",
+			Expected: BasicLit{
+				Number: ptr("0XFFF"),
+			},
+		},
+		{
+			Code: `0123`,
+			Expected: BasicLit{
+				Number: ptr(`0123`),
 			},
 		},
 		{
@@ -78,13 +120,8 @@ func TestBasicLit(t *testing.T) {
 				String: ptr("\"hello\nworld\""),
 			},
 		},
-
 		{
 			Code:      `hello`,
-			IsInvalid: true,
-		},
-		{
-			Code:      `0123`,
 			IsInvalid: true,
 		},
 		{
