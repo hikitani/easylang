@@ -382,49 +382,6 @@ func VariantsIsDeepEqual(lval, rval Variant) bool {
 	panic("is equal: unknown type " + lval.Type().String())
 }
 
-func VariantsIsEqual(lval, rval Variant) bool {
-	if lval.Type() != rval.Type() {
-		return false
-	}
-
-	switch lval.Type() {
-	case TypeNone:
-		return true
-	case TypeBool:
-		lb, rb := MustVariantCast[*VariantBool](lval), MustVariantCast[*VariantBool](rval)
-		return lb.v == rb.v
-	case TypeNum:
-		lnum, rnum := MustVariantCast[*VariantNum](lval), MustVariantCast[*VariantNum](rval)
-		return lnum.v.Cmp(rnum.v) == 0
-	case TypeString:
-		ls, rs := MustVariantCast[*VariantString](lval), MustVariantCast[*VariantString](rval)
-		return ls.v == rs.v
-	case TypeArray:
-		return false
-	case TypeObject:
-		lobj, robj := MustVariantCast[*VariantObject](lval), MustVariantCast[*VariantObject](rval)
-		if len(lobj.v) != len(robj.v) {
-			return false
-		}
-
-		for k, lv := range lobj.v {
-			rv, ok := robj.v[k]
-			if !ok {
-				return false
-			}
-
-			if !VariantsIsEqual(lv, rv) {
-				return false
-			}
-		}
-
-		return true
-	case TypeFunc:
-		return false
-	}
-	panic("is equal: unknown type " + lval.Type().String())
-}
-
 func NewVarNone() *VariantNone {
 	return &VariantNone{}
 }
