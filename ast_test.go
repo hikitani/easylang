@@ -120,25 +120,28 @@ func TestExpr(t *testing.T) {
 			).buz()[
 				"334",
 			]`,
-			Expected: Expr{UnaryExpr: UnaryExpr{Operand: Operand{ParenExpr: &Expr{
-				UnaryExpr: UnaryExpr{
-					Operand: Operand{
-						Name: &Ident{Name: "goo"},
-						PX: &PrimaryExpr{CallExpr: &CallExpr{Args: &List[Expr]{X: []*Expr{
-							{
-								UnaryExpr: UnaryExpr{Operand: Operand{
-									Literal: &Literal{Basic: &BasicLit{
-										Number: ptr("1"),
+			Expected: Expr{UnaryExpr: UnaryExpr{Operand: Operand{
+				ParenExpr: &Expr{
+					UnaryExpr: UnaryExpr{
+						Operand: Operand{
+							Name: &Ident{Name: "goo"},
+							PX: &PrimaryExpr{CallExpr: &CallExpr{Args: &List[Expr]{X: []*Expr{
+								{
+									UnaryExpr: UnaryExpr{Operand: Operand{
+										Literal: &Literal{Basic: &BasicLit{
+											Number: ptr("1"),
+										}},
 									}},
-								}},
-							},
-						}}}},
+								},
+							}}}},
+						},
 					},
 				},
-			},
 
 				PX: &PrimaryExpr{SelectorExpr: &SelectorExpr{
-					Sel: []Ident{{Name: "buz"}},
+					Sel: []SelectorExprPiece{{
+						Ident: &Ident{Name: "buz"},
+					}},
 					PX: &PrimaryExpr{CallExpr: &CallExpr{
 						PX: &PrimaryExpr{IndexExpr: &IndexExpr{Index: &List[Expr]{X: []*Expr{
 							{
@@ -159,17 +162,17 @@ func TestExpr(t *testing.T) {
 				}}}},
 				BinaryExpr: &BinaryExpr{
 					Op: "+",
-					X: Operand{ParenExpr: &Expr{
+					X: UnaryExpr{Operand: Operand{ParenExpr: &Expr{
 						UnaryExpr: UnaryExpr{Operand: Operand{Literal: &Literal{Basic: &BasicLit{
 							Number: ptr("34"),
 						}}}},
 						BinaryExpr: &BinaryExpr{
 							Op: "/",
-							X: Operand{Literal: &Literal{Basic: &BasicLit{
+							X: UnaryExpr{Operand: Operand{Literal: &Literal{Basic: &BasicLit{
 								Number: ptr("3"),
-							}}},
+							}}}},
 						},
-					}},
+					}}},
 				},
 			},
 		},
@@ -187,9 +190,9 @@ func TestExpr(t *testing.T) {
 							}}}},
 							BinaryExpr: &BinaryExpr{
 								Op: "+",
-								X: Operand{Literal: &Literal{Basic: &BasicLit{
+								X: UnaryExpr{Operand: Operand{Literal: &Literal{Basic: &BasicLit{
 									Number: ptr("22"),
-								}}},
+								}}}},
 							},
 						},
 						Value: Expr{UnaryExpr: UnaryExpr{Operand: Operand{Literal: &Literal{
@@ -359,7 +362,7 @@ func TestStmt(t *testing.T) {
 							UnaryExpr: UnaryExpr{Operand: Operand{Name: &Ident{Name: "a"}}},
 							BinaryExpr: &BinaryExpr{
 								Op: "<",
-								X:  Operand{Name: &Ident{Name: "b"}},
+								X:  UnaryExpr{Operand: Operand{Name: &Ident{Name: "b"}}},
 							},
 						},
 						Block: BlockStmt{List: &[]*Stmt{
@@ -375,7 +378,7 @@ func TestStmt(t *testing.T) {
 								UnaryExpr: UnaryExpr{Operand: Operand{Name: &Ident{Name: "b"}}},
 								BinaryExpr: &BinaryExpr{
 									Op: "<",
-									X:  Operand{Name: &Ident{Name: "a"}},
+									X:  UnaryExpr{Operand: Operand{Name: &Ident{Name: "a"}}},
 								},
 							},
 							Block: BlockStmt{List: &[]*Stmt{
@@ -437,9 +440,9 @@ func TestStmt(t *testing.T) {
 										}},
 										BinaryExpr: &BinaryExpr{
 											Op: "+",
-											X: Operand{
+											X: UnaryExpr{Operand: Operand{
 												Name: &Ident{Name: "n"},
-											},
+											}},
 										},
 									},
 								},
@@ -494,9 +497,9 @@ func TestStmt(t *testing.T) {
 											}}},
 											BinaryExpr: &BinaryExpr{
 												Op: ">",
-												X: Operand{Literal: &Literal{Basic: &BasicLit{
+												X: UnaryExpr{Operand: Operand{Literal: &Literal{Basic: &BasicLit{
 													Number: ptr("2"),
-												}}},
+												}}}},
 											},
 										},
 										Block: BlockStmt{List: &[]*Stmt{

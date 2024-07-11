@@ -300,6 +300,10 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 				return evaler(func() (Variant, error) {
 					return NewVarBool(false), nil
 				}), nil
+			case ConstValueInf:
+				return evaler(func() (Variant, error) {
+					return NewVarNum(new(big.Float).SetInf(false)), nil
+				}), nil
 			}
 
 			return nil, fmt.Errorf("unknown const value %s", name)
@@ -360,7 +364,7 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 		}
 
 		if len(args.X) == 0 {
-			return nil, errors.New("bad primary expression: indexator must have at least once index")
+			panic("syntax error: indexator must have at least once index")
 		}
 
 		idxEvals := make([]ExprEvaler, 0, len(args.X))
@@ -396,7 +400,7 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 					return nil, fmt.Errorf("index must be number, got %s", idx.Type())
 				}
 
-				num, err := MustVariantCast[*VariantNum](idx).AsUInt64()
+				num, err := MustVariantCast[*VariantNum](idx).AsInt64()
 				if err != nil {
 					return nil, fmt.Errorf("cannot to represent number as unsigned integer: %w", err)
 				}
@@ -481,16 +485,34 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 		nextNode = node.SelectorExpr.PX
 		sels := node.SelectorExpr.Sel
 		if len(sels) == 0 {
-			return nil, errors.New("bad primary expression: expected selector, got nothing")
+			panic("expected selector, got nothing")
 		}
 
-		selVars := make([]Variant, 0, len(sels))
+		selVars := make([]*VariantString, 0, len(sels))
 		for i, sel := range sels {
-			if sel.Name == "" {
-				return nil, fmt.Errorf("bad primary expression: selector at %d position must be named", i+1)
+			var val *VariantString
+			switch {
+			case sel.Ident != nil:
+				if sel.Ident.Name == "" {
+					panic(fmt.Sprintf("bad primary expression: selector at %d position must be named", i+1))
+				}
+
+				val = NewVarString(sel.Ident.Name)
+			case sel.String != nil:
+				strEval, err := (&BasicLitCodeGen{}).CodeGen(&BasicLit{String: sel.String})
+				if err != nil {
+					return nil, fmt.Errorf("bad primary expression: selector at %d position is invalid: %w", i+1, err)
+				}
+
+				res, err := strEval.Eval()
+				if err != nil {
+					panic(fmt.Sprintf("cannot evaluate selector at %d position: %s", i+1, err))
+				}
+
+				val = MustVariantCast[*VariantString](res)
 			}
 
-			selVars = append(selVars, &VariantString{v: sel.Name})
+			selVars = append(selVars, val)
 		}
 
 		eval = evaler(func() (Variant, error) {
@@ -508,12 +530,12 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 			for i, sel := range selVars {
 				v, err := obj.Get(sel)
 				if err != nil {
-					return nil, fmt.Errorf("cannot get value by %s: %w", sels[i].Name, err)
+					return nil, fmt.Errorf("cannot get value by %s: %w", selVars[i], err)
 				}
 
 				if i != len(selVars)-1 {
 					if v.Type() != TypeObject {
-						return nil, fmt.Errorf("unsupported selector %s for %s (expected object)", sels[i+1].Name, v.Type())
+						return nil, fmt.Errorf("unsupported selector %s for %s (expected object)", selVars[i+1], v.Type())
 					}
 
 					obj = MustVariantCast[*VariantObject](v)
@@ -692,26 +714,14 @@ func (c *BlockExprCodeGen) CodeGen(node *BlockExpr) (ExprEvaler, error) {
 		return nil, fmt.Errorf("bad block expression: invalid block statement: %w", err)
 	}
 
-	eval := evaler(func() (Variant, error) {
+	return evaler(func() (Variant, error) {
 		err := invoker.Invoke()
 		if err != nil && !errors.Is(err, ErrStmtFinished) {
 			return nil, err
 		}
 
 		return vars.LastScope().GetReturn(), nil
-	})
-
-	if node.PX != nil {
-		eval, err = (&PrimaryExprCodeGen{
-			exprGen:  &ExprCodeGen{vars: vars.Unscope()},
-			prevEval: eval,
-		}).CodeGen(node.PX)
-		if err != nil {
-			return nil, fmt.Errorf("bad primary expression: %w", err)
-		}
-	}
-
-	return eval, nil
+	}), nil
 }
 
 type ExprCodeGen struct {
@@ -744,7 +754,7 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 			origPos: i,
 		})
 
-		eval, err := (&OperandCodeGen{exprGen: c}).CodeGen(&binExpr.X)
+		eval, err := (&UnaryExprCodeGen{exprGen: c}).CodeGen(&binExpr.X)
 		if err != nil {
 			return nil, fmt.Errorf("bad operand at %s position", binExpr.X.GetPos())
 		}
@@ -832,9 +842,9 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 		b := false
 		switch op {
 		case "==":
-			b = VariantsIsEqual(lval, rval)
+			b = VariantsIsDeepEqual(lval, rval)
 		case "!=":
-			b = !VariantsIsEqual(lval, rval)
+			b = !VariantsIsDeepEqual(lval, rval)
 		case "<", "<=", ">", ">=":
 			if rval.Type() != TypeNum {
 				return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
@@ -869,20 +879,50 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 		num := new(big.Float)
 		switch op {
 		case "+":
+			if lnum.IsInf() && rnum.IsInf() && lnum.Sign() != rnum.Sign() {
+				return nil, errors.New("op '+': addition of inf and inf with opposite signs")
+			}
 			num.Add(lnum.v, rnum.v)
 		case "-":
+			if lnum.IsInf() && rnum.IsInf() && lnum.Sign() == rnum.Sign() {
+				return nil, errors.New("op '-': subtraction of inf from inf with equal signs")
+			}
 			num.Sub(lnum.v, rnum.v)
 		case "/":
+			if lnum.IsZero() && rnum.IsZero() {
+				return nil, errors.New("op '/': division of zero into zero")
+			}
+			if lnum.IsInf() && rnum.IsInf() {
+				return nil, errors.New("op '/': division of inf into inf")
+			}
 			num.Quo(lnum.v, rnum.v)
 		case "*":
+			if (lnum.IsZero() && rnum.IsInf()) || (lnum.IsInf() && rnum.IsZero()) {
+				return nil, errors.New("op '*': one operand is zero and the other operand an infinity")
+			}
 			num.Mul(lnum.v, rnum.v)
 		case "%":
-			if div := new(big.Float).Quo(lnum.v, rnum.v); div.IsInt() {
-				divInt, _ := div.Int(nil)
-				mul := new(big.Float).Mul(div.SetInt(divInt), rnum.v)
-				num.Sub(lnum.v, mul)
+			if lnum.v.IsInt() && rnum.v.IsInt() {
+				var x, y big.Int
+				lnum.v.Int(&x)
+				rnum.v.Int(&y)
+				if len(y.Bits()) == 0 {
+					return nil, errors.New("op '%': division by zero")
+				}
+
+				num.SetInt(x.Mod(&x, &y))
+			} else if div := new(big.Float).Quo(lnum.v, rnum.v); div.IsInf() {
+				num.Set(div)
 			} else {
-				num.SetInf(div.Signbit())
+				// div = x / y
+				// x % y = x - int(div) * y
+
+				// 1. int(div)
+				divInt, _ := div.Int(nil)
+				// 2. int(div) * y
+				mul := new(big.Float).Mul(div.SetInt(divInt), rnum.v)
+				// 3. x - int(div) * y
+				num.Sub(lnum.v, mul)
 			}
 		default:
 			return nil, fmt.Errorf("unknown operation 'number %s number'", op)

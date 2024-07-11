@@ -49,7 +49,7 @@ func (m MemReaderBool) Read(p []byte) (n int, err error) {
 	}
 
 	boolread(&p[0], &m.v)
-	return n, nil
+	return n, io.EOF
 }
 
 func boolread(dst *byte, src *bool) {

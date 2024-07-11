@@ -72,8 +72,8 @@ type Expr struct {
 
 type BinaryExpr struct {
 	Node
-	Op   string      `EOL* @OpBinary EOL*`
-	X    Operand     `@@`
+	Op   string      `EOL* @(OpBinaryPrior1 | OpBinaryPrior2) EOL*`
+	X    UnaryExpr   `@@`
 	Next *BinaryExpr `@@?`
 }
 
@@ -102,8 +102,7 @@ type Operand struct {
 
 type BlockExpr struct {
 	Node
-	Block BlockStmt    `"block" @@`
-	PX    *PrimaryExpr `@@?`
+	Block BlockStmt `"block" @@`
 }
 
 type FuncExpr struct {
@@ -115,8 +114,14 @@ type FuncExpr struct {
 
 type SelectorExpr struct {
 	Node
-	Sel []Ident      `"." @@ ("." @@)*`
-	PX  *PrimaryExpr `@@?`
+	Sel []SelectorExprPiece `"." @@ ("." @@)*`
+	PX  *PrimaryExpr        `@@?`
+}
+
+type SelectorExprPiece struct {
+	Node
+	Ident  *Ident  `( @@`
+	String *string `| @String )`
 }
 
 type IndexExpr struct {

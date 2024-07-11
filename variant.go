@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strings"
 )
@@ -102,6 +103,19 @@ type VariantNum struct {
 	v *big.Float
 }
 
+func (v *VariantNum) IsZero() bool {
+	n, acc := v.v.Int64()
+	return n == 0 && acc == big.Exact
+}
+
+func (v *VariantNum) IsInf() bool {
+	return v.v.IsInf()
+}
+
+func (v *VariantNum) Sign() int {
+	return v.v.Sign()
+}
+
 func (v *VariantNum) LessThan(than *VariantNum) bool {
 	return v.v.Cmp(than.v) == -1
 }
@@ -139,6 +153,23 @@ func (v *VariantNum) AsUInt64() (uint64, error) {
 	return num, nil
 }
 
+func (v *VariantNum) AsInt64() (int64, error) {
+	if !v.v.IsInt() {
+		return 0, errors.New("number is not integer")
+	}
+
+	num, acc := v.v.Int64()
+	if acc == big.Above && num == math.MinInt64 {
+		return 0, errors.New("number less than -2^63 (min int64)")
+	}
+
+	if acc == big.Below && num == math.MaxInt64 {
+		return 0, errors.New("number greater than 2^63 - 1 (max int64)")
+	}
+
+	return num, nil
+}
+
 func (v *VariantNum) MemReader() io.Reader {
 	prec := v.v.Prec()
 	cap := 10 + prec
@@ -155,6 +186,10 @@ func (v *VariantNum) Type() VarType {
 
 type VariantString struct {
 	v string
+}
+
+func (v *VariantString) String() string {
+	return v.v
 }
 
 func (v *VariantString) MemReader() io.Reader {
@@ -176,12 +211,17 @@ func (v *VariantArray) Len() int {
 	return len(v.v)
 }
 
-func (v *VariantArray) Get(idx uint64) (Variant, error) {
-	if idx >= uint64(len(v.v)) {
-		return nil, fmt.Errorf("index out of range")
+func (v *VariantArray) Get(idx int64) (Variant, error) {
+	norm := idx
+	if idx < 0 {
+		norm = int64(len(v.v)) + idx
 	}
 
-	return v.v[idx], nil
+	if norm >= int64(len(v.v)) {
+		return nil, fmt.Errorf("index %d out of range", idx)
+	}
+
+	return v.v[norm], nil
 }
 
 func (v VariantArray) MemReader() io.Reader {
@@ -417,5 +457,15 @@ func NewVarFloat[T float32 | float64](v T) *VariantNum {
 		SetPrec(64).
 		SetMode(big.ToNearestEven).
 		SetFloat64(float64(v))
+	return &VariantNum{v: f}
+}
+
+func NewVarInf() *VariantNum {
+	f := new(big.Float).SetInf(false)
+	return &VariantNum{v: f}
+}
+
+func NewVarNegInf() *VariantNum {
+	f := new(big.Float).SetInf(true)
 	return &VariantNum{v: f}
 }

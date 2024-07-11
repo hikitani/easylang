@@ -22,7 +22,8 @@ var lexdef = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Whitespace", Pattern: `[ \t]+`},
 	{Name: "Comment", Pattern: "#[^\n]*\n?"},
 	{Name: "FuncSign", Pattern: "=>"},
-	{Name: "OpBinary", Pattern: `and|or|==|!=|<|<=|>|>=|\+|-|\*|/|%`},
+	{Name: "OpBinaryPrior1", Pattern: `==|!=|<=|>=`},
+	{Name: "OpBinaryPrior2", Pattern: `and|or|<|>|\+|-|\*|/|%`},
 	{Name: "OpUnary", Pattern: `-|not`},
 	{Name: "Number", Pattern: strings.Join([]string{"inf", binaryDigitsRe, octalDigitsRe, hexDigitsRe, digits10Re}, "|")},
 	{Name: "String", Pattern: `"(?:\\.|[^"])*"`},
@@ -42,6 +43,7 @@ const (
 	ConstValueNone  = "none"
 	ConstValueTrue  = "true"
 	ConstValueFalse = "false"
+	ConstValueInf   = "inf"
 )
 
 var operatorPriorities = map[string]int{
@@ -53,7 +55,7 @@ var operatorPriorities = map[string]int{
 
 func IsConstValue(s string) bool {
 	switch s {
-	case ConstValueNone, ConstValueTrue, ConstValueFalse:
+	case ConstValueNone, ConstValueTrue, ConstValueFalse, ConstValueInf:
 		return true
 	}
 
