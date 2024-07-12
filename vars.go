@@ -184,6 +184,10 @@ func (vars *Vars) Register(name string) (*VarScope, Register) {
 		}
 	}
 
+	if r, ok := vars.Global.LookupRegister(name); ok {
+		return vars.Global, r
+	}
+
 	return vars.LastScope(), vars.LastScope().r.Register(name)
 }
 

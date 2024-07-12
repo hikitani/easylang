@@ -908,6 +908,392 @@ func TestExprCode(t *testing.T) {
 	}
 }
 
+func TestStmtCode(t *testing.T) {
+	parser, err := participle.Build[ProgramFile](
+		participle.Lexer(lexdef),
+		participle.Elide("Comment", "Whitespace"),
+	)
+	require.NoError(t, err)
+
+	tests := []struct {
+		Name           string
+		Input          string
+		IsCompileError bool
+		ExpectedVar    func(name string, is *assert.Assertions, vars *Vars)
+	}{
+		{
+			Name:  "Stmt_Assign",
+			Input: `foo = "hello"`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("foo")
+				if !ok {
+					is.Fail("register foo not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var foo not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantString)
+				if !ok {
+					is.Fail("var foo is not string", name)
+					return
+				}
+
+				is.Equal(s.String(), "hello")
+			},
+		},
+		{
+			Name: "Stmt_If_Simple",
+			Input: `
+			a = 1
+			if a > 0 {
+				b = a + 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.debugChilds[0].LastScope().LookupRegister("b")
+				if !ok {
+					is.Fail("register b not found", name)
+					return
+				}
+
+				v, ok := vars.debugChilds[0].GetVar(r)
+				if !ok {
+					is.Fail("var b not found", name)
+					return
+				}
+
+				b, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var b is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(b, NewVarInt(2)))
+			},
+		},
+		{
+			Name: "Stmt_If_Else_True",
+			Input: `
+			a = 1
+			if a > 0 {
+				b = a + 1
+			} else {
+				b = a - 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.debugChilds[0].LastScope().LookupRegister("b")
+				if !ok {
+					is.Fail("register b not found", name)
+					return
+				}
+
+				v, ok := vars.debugChilds[0].GetVar(r)
+				if !ok {
+					is.Fail("var b not found", name)
+					return
+				}
+
+				b, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var b is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(b, NewVarInt(2)))
+			},
+		},
+		{
+			Name: "Stmt_If_Else_False",
+			Input: `
+			a = 1
+			if a < 0 {
+				b = a + 1
+			} else {
+				b = a - 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.debugChilds[1].LastScope().LookupRegister("b")
+				if !ok {
+					is.Fail("register b not found", name)
+					return
+				}
+
+				v, ok := vars.debugChilds[1].GetVar(r)
+				if !ok {
+					is.Fail("var b not found", name)
+					return
+				}
+
+				b, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var b is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(b, NewVarInt(0)))
+			},
+		},
+		{
+			Name: "Stmt_If_ElseIf",
+			Input: `
+			a = 1
+			if a < 0 {
+				b = a + 1
+			} else if a >= 1 {
+				b = a - 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.debugChilds[1].LastScope().LookupRegister("b")
+				if !ok {
+					is.Fail("register b not found", name)
+					return
+				}
+
+				v, ok := vars.debugChilds[1].GetVar(r)
+				if !ok {
+					is.Fail("var b not found", name)
+					return
+				}
+
+				b, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var b is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(b, NewVarInt(0)))
+			},
+		},
+		{
+			Name: "Stmt_Return_Block",
+			Input: `
+			a = block {
+				return "hello"
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("a")
+				if !ok {
+					is.Fail("register a not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var a not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantString)
+				if !ok {
+					is.Fail("var a is not string", name)
+					return
+				}
+
+				is.Equal(s.String(), "hello")
+			},
+		},
+		{
+			Name: "Stmt_Return_Func",
+			Input: `
+			a = || => {
+				return "hello"
+			}()`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("a")
+				if !ok {
+					is.Fail("register a not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var a not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantString)
+				if !ok {
+					is.Fail("var a is not string", name)
+					return
+				}
+
+				is.Equal(s.String(), "hello")
+			},
+		},
+		{
+			Name:           "Stmt_Return_Invalid_Global",
+			Input:          `return 1`,
+			IsCompileError: true,
+		},
+		{
+			Name: "Stmt_While",
+			Input: `
+			i = 0
+			while i < 10 {
+				i = i + 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("i")
+				if !ok {
+					is.Fail("register i not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var i not found", name)
+					return
+				}
+
+				i, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var i is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(i, NewVarInt(10)))
+			},
+		},
+		{
+			Name: "Stmt_While_Break",
+			Input: `
+			i = 0
+			while true {
+				if i == 10 {
+					break
+				}
+				i = i + 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("i")
+				if !ok {
+					is.Fail("register i not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var i not found", name)
+					return
+				}
+
+				i, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var i is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(i, NewVarInt(10)))
+			},
+		},
+		{
+			Name: "Stmt_While_Continue",
+			Input: `
+			i = 0
+			s = 0
+			while i < 10 {
+				i = i + 1
+
+				if i % 2 == 0 {
+					continue
+				}
+
+				s = s + 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(5)))
+			},
+		},
+		{
+			Name: "Stmt_WhileNested_Break",
+			Input: `
+			i = 0
+			j = 0
+			while i < 10 {
+				while true {
+					if j % 10 {
+						break
+					}
+
+					j = j + 1
+				}
+				i = i + 1
+			}`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("i")
+				if !ok {
+					is.Fail("register i not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var i not found", name)
+					return
+				}
+
+				i, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var i is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(i, NewVarInt(10)))
+			},
+		},
+	}
+
+	is := assert.New(t)
+	for _, testCase := range tests {
+		stmt, err := parser.ParseString("", testCase.Input)
+		if err != nil {
+			is.Fail(err.Error(), testCase.Name)
+			continue
+		}
+
+		vars := NewDebugVars()
+		invoker, err := (&Program{vars: vars}).CodeGen(stmt)
+		if testCase.IsCompileError {
+			assert.Error(t, err, testCase.Name)
+			continue
+		}
+
+		if err != nil {
+			is.Fail(err.Error(), testCase.Name)
+			continue
+		}
+
+		if err := invoker.Invoke(); err != nil {
+			is.Fail(err.Error(), testCase.Name)
+			continue
+		}
+
+		testCase.ExpectedVar(testCase.Name, is, vars)
+	}
+}
+
 func BenchmarkProgram(b *testing.B) {
 	parser, err := participle.Build[ProgramFile](
 		participle.Lexer(lexdef),

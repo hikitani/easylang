@@ -138,11 +138,13 @@ type CallExpr struct {
 
 type Stmt struct {
 	Node
-	If     *IfStmt     `( @@`
-	For    *ForStmt    `| @@`
-	While  *WhileStmt  `| @@`
-	Return *ReturnStmt `| @@`
-	Expr   *ExprStmt   `| @@ )`
+	If       *IfStmt       `( @@`
+	For      *ForStmt      `| @@`
+	While    *WhileStmt    `| @@`
+	Return   *ReturnStmt   `| @@`
+	Continue *ContinueStmt `| @@`
+	Break    *BreakStmt    `| @@`
+	Expr     *ExprStmt     `| @@ )`
 }
 
 type ExprStmt struct {
@@ -180,6 +182,16 @@ type WhileStmt struct {
 type ReturnStmt struct {
 	Node
 	ReturnExpr *Expr `"return" @@?`
+}
+
+type ContinueStmt struct {
+	Node
+	Key struct{} `"continue"`
+}
+
+type BreakStmt struct {
+	Node
+	Key struct{} `"break"`
 }
 
 type ProgramFile struct {

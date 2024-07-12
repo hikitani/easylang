@@ -10,7 +10,11 @@ import (
 	"strings"
 )
 
-var ErrStmtFinished = errors.New("stmt finished")
+var (
+	ErrStmtFinished = errors.New("stmt finished")
+	ErrLoopContinue = errors.New("loop continue")
+	ErrLoopBreak    = errors.New("loop break")
+)
 
 type ExprCodeGenerator[T Node] interface {
 	CodeGen(node *T) ExprEvaler
@@ -984,6 +988,22 @@ func lenAfter(s string, pos int) int {
 	return max(0, len(s)-(pos+1))
 }
 
+type ContinueStmtCodeGen struct{}
+
+func (c *ContinueStmtCodeGen) CodeGen(node *ContinueStmt) (StmtInvoker, error) {
+	return invoker(func() error {
+		return ErrLoopContinue
+	}), nil
+}
+
+type BreakStmtCodeGen struct{}
+
+func (c *BreakStmtCodeGen) CodeGen(node *BreakStmt) (StmtInvoker, error) {
+	return invoker(func() error {
+		return ErrLoopBreak
+	}), nil
+}
+
 type ReturnStmtCodeGen struct {
 	vars *Vars
 }
@@ -1068,6 +1088,7 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 }
 
 type StmtCodeGen struct {
+	isLoopScope   bool
 	isGlobalScope bool
 	vars          *Vars
 }
@@ -1076,7 +1097,8 @@ func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 	switch {
 	case node.If != nil:
 		invoker, err = (&IfStmtCodeGen{
-			vars: c.vars,
+			isLoopScope: c.isLoopScope,
+			vars:        c.vars,
 		}).CodeGen(node.If)
 	case node.For != nil:
 		invoker, err = (&ForStmtCodeGen{
@@ -1094,6 +1116,18 @@ func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 		invoker, err = (&ReturnStmtCodeGen{
 			vars: c.vars,
 		}).CodeGen(node.Return)
+	case node.Continue != nil:
+		if !c.isLoopScope {
+			return nil, errors.New("continue statement cannot be used outside of a loop")
+		}
+
+		invoker, err = (&ContinueStmtCodeGen{}).CodeGen(node.Continue)
+	case node.Break != nil:
+		if !c.isLoopScope {
+			return nil, errors.New("break statement cannot be used outside of a loop")
+		}
+
+		invoker, err = (&BreakStmtCodeGen{}).CodeGen(node.Break)
 	case node.Expr != nil:
 		invoker, err = (&ExprStmtCodeGen{
 			exprGen: &ExprCodeGen{vars: c.vars},
@@ -1106,7 +1140,8 @@ func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 }
 
 type BlockStmtCodeGen struct {
-	vars *Vars
+	vars        *Vars
+	isLoopScope bool
 }
 
 func (c *BlockStmtCodeGen) CodeGen(node *BlockStmt) (StmtInvoker, error) {
@@ -1121,7 +1156,7 @@ func (c *BlockStmtCodeGen) CodeGen(node *BlockStmt) (StmtInvoker, error) {
 			return nil, errors.New("bad block statement")
 		}
 
-		invoker, err := (&StmtCodeGen{vars: c.vars}).CodeGen(stmt)
+		invoker, err := (&StmtCodeGen{vars: c.vars, isLoopScope: c.isLoopScope}).CodeGen(stmt)
 		if err != nil {
 			return nil, fmt.Errorf("bad statement: %w", err)
 		}
@@ -1152,7 +1187,8 @@ func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
 
 	vars := c.vars.WithScope()
 	blkInvoker, err := (&BlockStmtCodeGen{
-		vars: vars,
+		vars:        vars,
+		isLoopScope: true,
 	}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("invalid while block statement: %w", err)
@@ -1174,10 +1210,20 @@ func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
 				return nil
 			}
 
-			if err := blkInvoker.Invoke(); err != nil {
+			err = blkInvoker.Invoke()
+			if errors.Is(err, ErrLoopBreak) {
+				break
+			}
+
+			if errors.Is(err, ErrLoopContinue) {
+				continue
+			}
+
+			if err != nil {
 				return err
 			}
 		}
+		return nil
 	}), nil
 }
 
@@ -1201,7 +1247,7 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 	}
 
 	blkVars := c.vars.WithScope()
-	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars}).CodeGen(&node.Block)
+	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars, isLoopScope: true}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("bad for statement: invalid block statement: %w", err)
 	}
@@ -1248,7 +1294,16 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 
 			for i, el := range arr.v {
 				iterArr(i, el)
-				if err := blkInvoker.Invoke(); err != nil {
+				err := blkInvoker.Invoke()
+				if errors.Is(err, ErrLoopBreak) {
+					break
+				}
+
+				if errors.Is(err, ErrLoopContinue) {
+					continue
+				}
+
+				if err != nil {
 					return err
 				}
 			}
@@ -1260,7 +1315,16 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 
 			for k, v := range obj.v {
 				iterObj(k, v)
-				if err := blkInvoker.Invoke(); err != nil {
+				err := blkInvoker.Invoke()
+				if errors.Is(err, ErrLoopBreak) {
+					break
+				}
+
+				if errors.Is(err, ErrLoopContinue) {
+					continue
+				}
+
+				if err != nil {
 					return err
 				}
 			}
@@ -1273,7 +1337,8 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 }
 
 type IfStmtCodeGen struct {
-	vars *Vars
+	isLoopScope bool
+	vars        *Vars
 }
 
 func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
@@ -1283,7 +1348,7 @@ func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
 	}
 
 	blkVars := c.vars.WithScope()
-	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars}).CodeGen(&node.Block)
+	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars, isLoopScope: c.isLoopScope}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("bad if statement: invalid block statement: %w", err)
 	}
@@ -1292,12 +1357,12 @@ func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
 	switch {
 	case node.ElseBlock != nil:
 		elseBlkVars := c.vars.WithScope()
-		elseBlkInvoker, err = (&BlockStmtCodeGen{vars: elseBlkVars}).CodeGen(node.ElseBlock)
+		elseBlkInvoker, err = (&BlockStmtCodeGen{vars: elseBlkVars, isLoopScope: c.isLoopScope}).CodeGen(node.ElseBlock)
 		if err != nil {
 			return nil, fmt.Errorf("bad if statement: invalid else block statement: %w", err)
 		}
 	case node.ElseIf != nil:
-		nextIfInvoker, err = (&IfStmtCodeGen{vars: c.vars}).CodeGen(node.ElseIf)
+		nextIfInvoker, err = (&IfStmtCodeGen{vars: c.vars, isLoopScope: c.isLoopScope}).CodeGen(node.ElseIf)
 		if err != nil {
 			return nil, fmt.Errorf("bad if statement: invalid else if block statement: %w", err)
 		}

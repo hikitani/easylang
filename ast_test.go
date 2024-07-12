@@ -493,6 +493,8 @@ func TestStmt(t *testing.T) {
 			Code: `
 			while true {
 				foo()
+				break
+				continue
 			}`,
 			Expected: ProgramFile{List: &[]*Stmt{
 				{
@@ -504,6 +506,12 @@ func TestStmt(t *testing.T) {
 									Name: &Ident{Name: "foo"},
 									PX:   &PrimaryExpr{CallExpr: &CallExpr{}},
 								}}}},
+							},
+							{
+								Break: &BreakStmt{},
+							},
+							{
+								Continue: &ContinueStmt{},
 							},
 						}},
 					},
