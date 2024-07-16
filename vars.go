@@ -55,6 +55,10 @@ func (scope *VarScope) GetReturn() Variant {
 	return v
 }
 
+func (scope *VarScope) Register(name string) Register {
+	return scope.r.Register(name)
+}
+
 func (scope *VarScope) GetVar(r Register) (Variant, bool) {
 	v, ok := scope.m[r]
 	return v, ok
@@ -188,7 +192,7 @@ func (vars *Vars) Register(name string) (*VarScope, Register) {
 		return vars.Global, r
 	}
 
-	return vars.LastScope(), vars.LastScope().r.Register(name)
+	return vars.LastScope(), vars.LastScope().Register(name)
 }
 
 func (vars *Vars) SetOrDefineVariable(name Register, value Variant) {

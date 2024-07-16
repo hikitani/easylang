@@ -149,7 +149,7 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Object_Empty",
 			Input:    `{}`,
-			Expected: NewVarObject(nil),
+			Expected: MustNewVarObject(nil, nil),
 		},
 		{
 			Name: "Object_Filled",
@@ -158,13 +158,17 @@ func TestExprCode(t *testing.T) {
 				111: [],
 				[1, 2, 3]: {1: 2},
 			}`,
-			Expected: NewVarObject(map[string]Variant{
-				mustReprVar(NewVarString("hello")): NewVarString("world"),
-				mustReprVar(NewVarInt(111)):        NewVarArray(nil),
-				mustReprVar(NewVarArray([]Variant{
-					NewVarInt(1), NewVarInt(2), NewVarInt(3),
-				})): NewVarObject(map[string]Variant{mustReprVar(NewVarInt(1)): NewVarInt(2)}),
-			}),
+			Expected: MustNewVarObject(
+				[]Variant{
+					NewVarString("hello"),
+					NewVarInt(111),
+					NewVarArray([]Variant{NewVarInt(1), NewVarInt(2), NewVarInt(3)})},
+				[]Variant{
+					NewVarString("world"),
+					NewVarArray(nil),
+					MustNewVarObject([]Variant{NewVarInt(1)}, []Variant{NewVarInt(2)}),
+				},
+			),
 		},
 		{
 			Name: "Object_InvalidKey",
@@ -1233,34 +1237,332 @@ func TestStmtCode(t *testing.T) {
 			j = 0
 			while i < 10 {
 				while true {
-					if j % 10 {
-						break
-					}
-
-					j = j + 1
+					j = j + 2
+					break
 				}
 				i = i + 1
 			}`,
 			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("i")
+				r, ok := vars.Global.LookupRegister("j")
 				if !ok {
-					is.Fail("register i not found", name)
+					is.Fail("register j not found", name)
 					return
 				}
 
 				v, ok := vars.Global.GetVar(r)
 				if !ok {
-					is.Fail("var i not found", name)
+					is.Fail("var j not found", name)
 					return
 				}
 
-				i, ok := v.(*VariantNum)
+				j, ok := v.(*VariantNum)
 				if !ok {
-					is.Fail("var i is not num", name)
+					is.Fail("var j is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(i, NewVarInt(10)))
+				is.True(VariantsIsDeepEqual(j, NewVarInt(20)))
+			},
+		},
+		{
+			Name: "Stmt_For_Array_ByVal",
+			Input: `
+			s = 0
+			for v in [1, 2, 3] {
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+			},
+		},
+		{
+			Name: "Stmt_For_Array_ByValWithIdx",
+			Input: `
+			s = 0
+			for i, v in [1, 2, 3] {
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+			},
+		},
+		{
+			Name: "Stmt_For_Array_ByIdx",
+			Input: `
+			s = 0
+			arr = [1, 2, 3]
+			for i, _ in arr {
+				s = s + arr[i]
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+			},
+		},
+		{
+			Name: "Stmt_For_Object_ByKey",
+			Input: `
+			s = 0
+			obj = {
+				"1": 1,
+				"2": 2,
+				"3": 3,
+			}
+			for k in obj {
+				s = s + obj[k]
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+			},
+		},
+		{
+			Name: "Stmt_For_Object_ByVal",
+			Input: `
+			s = 0
+			obj = {
+				"1": 1,
+				"2": 2,
+				"3": 3,
+			}
+			for _, v in obj {
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+			},
+		},
+		{
+			Name: "Stmt_For_Continue",
+			Input: `
+			s = 0
+			for v in [1, 2, 3] {
+				if v % 2 == 0 {
+					continue
+				}
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(4)), name)
+			},
+		},
+		{
+			Name: "Stmt_For_Break",
+			Input: `
+			s = 0
+			for v in [1, 2, 3] {
+				if v % 2 == 0 {
+					break
+				}
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(1)), name)
+			},
+		},
+		{
+			Name: "Stmt_ForNested_Break",
+			Input: `
+			s = 0
+			for v in [1, 2, 3] {
+				for v in [2, 1] {
+					if v % 2 != 0 {
+						break
+					}
+
+					s = s + v
+				}
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(12)), name)
+			},
+		},
+		{
+			Name: "Stmt_ForNested_Continue",
+			Input: `
+			s = 0
+			for v in [1, 2, 3] {
+				for v in [1, 2] {
+					if v % 2 != 0 {
+						continue
+					}
+
+					s = s + v
+				}
+				s = s + v
+			}
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantNum)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(VariantsIsDeepEqual(s, NewVarInt(12)), name)
 			},
 		},
 	}

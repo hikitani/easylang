@@ -247,7 +247,19 @@ func (v *VariantArray) Type() VarType {
 }
 
 type VariantObject struct {
-	v map[string]Variant
+	v    map[string]Variant
+	keys map[string]Variant
+}
+
+func (obj *VariantObject) Set(k, v Variant) error {
+	kb, err := io.ReadAll(k.MemReader())
+	if err != nil {
+		return fmt.Errorf("%s is not hashable", k.Type())
+	}
+
+	obj.v[string(kb)] = v
+	obj.keys[string(kb)] = k
+	return nil
 }
 
 func (v *VariantObject) Len() int {
@@ -402,8 +414,32 @@ func NewVarArray(v []Variant) *VariantArray {
 	return &VariantArray{v: v}
 }
 
-func NewVarObject(v map[string]Variant) *VariantObject {
-	return &VariantObject{v: v}
+func NewVarObject(keys []Variant, values []Variant) (*VariantObject, error) {
+	if len(keys) != len(values) {
+		return nil, errors.New("the number of keys does not match the number of values")
+	}
+	m := make(map[string]Variant, len(keys))
+	ks := make(map[string]Variant, len(keys))
+	for i := 0; i < len(keys); i++ {
+		k, v := keys[i], values[i]
+		kb, err := io.ReadAll(k.MemReader())
+		if err != nil {
+			return nil, fmt.Errorf("read key mem: %w", err)
+		}
+
+		m[string(kb)] = v
+		ks[string(kb)] = k
+	}
+
+	return &VariantObject{v: m, keys: ks}, nil
+}
+
+func MustNewVarObject(keys []Variant, values []Variant) *VariantObject {
+	obj, err := NewVarObject(keys, values)
+	if err != nil {
+		panic("object constructor: " + err.Error())
+	}
+	return obj
 }
 
 func NewVarFunc(v func(args []Variant) (Variant, error)) *VariantFunc {

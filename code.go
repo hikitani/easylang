@@ -3,7 +3,6 @@ package easylang
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"sort"
 	"strconv"
@@ -206,7 +205,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 
 		if len(items.X) == 0 {
 			return evaler(func() (Variant, error) {
-				return NewVarObject(map[string]Variant{}), nil
+				return MustNewVarObject(nil, nil), nil
 			}), nil
 		}
 
@@ -230,7 +229,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (Variant, error) {
-			obj := NewVarObject(make(map[string]Variant, len(kvEvals)))
+			keys, vals := make([]Variant, 0, len(kvEvals)), make([]Variant, 0, len(kvEvals))
 			for i, kv := range kvEvals {
 				keyEval, valEval := kv[0], kv[1]
 				key, err := keyEval.Eval()
@@ -238,20 +237,16 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 					return nil, fmt.Errorf("cannot evaluate expression of key on position %d: %w", i+1, err)
 				}
 
-				kb, err := io.ReadAll(key.MemReader())
-				if err != nil {
-					return nil, fmt.Errorf("key on position %d is not hashable: %w", i+1, err)
-				}
-
 				val, err := valEval.Eval()
 				if err != nil {
 					return nil, fmt.Errorf("cannot evaluate expression of value on position %d: %w", i+1, err)
 				}
 
-				obj.v[string(kb)] = val
+				keys = append(keys, key)
+				vals = append(vals, val)
 			}
 
-			return obj, nil
+			return MustNewVarObject(keys, vals), nil
 		}), nil
 	}
 
@@ -1253,27 +1248,29 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 	}
 
 	iterArr := func(i int, el Variant) {}
-	iterObj := func(k string, el Variant) {}
+	iterObj := func(k Variant, el Variant) {}
+
+	scope := blkVars.LastScope()
 	switch len(varnames.X) {
 	case 0:
 	case 1:
-		s1, r1 := blkVars.Register(varnames.X[0].Name)
-		iterArr = func(i int, _ Variant) {
-			s1.DefineVar(r1, NewVarNum(big.NewFloat(float64(i))))
+		r1 := scope.Register(varnames.X[0].Name)
+		iterArr = func(_ int, el Variant) {
+			scope.DefineVar(r1, el)
 		}
-		iterObj = func(k string, _ Variant) {
-			blkVars.DefineVariable(r1, NewVarString(k))
+		iterObj = func(k Variant, _ Variant) {
+			scope.DefineVar(r1, k)
 		}
 	case 2:
-		s1, r1 := blkVars.Register(varnames.X[0].Name)
-		s2, r2 := blkVars.Register(varnames.X[1].Name)
+		r1 := scope.Register(varnames.X[0].Name)
+		r2 := scope.Register(varnames.X[1].Name)
 		iterArr = func(i int, el Variant) {
-			s1.DefineVar(r1, NewVarNum(big.NewFloat(float64(i))))
-			s2.DefineVar(r2, el)
+			scope.DefineVar(r1, NewVarInt(i))
+			scope.DefineVar(r2, el)
 		}
-		iterObj = func(k string, el Variant) {
-			s1.DefineVar(r1, NewVarString(k))
-			s2.DefineVar(r2, el)
+		iterObj = func(k Variant, el Variant) {
+			scope.DefineVar(r1, k)
+			scope.DefineVar(r2, el)
 		}
 	default:
 		panic("unreachable")
@@ -1314,7 +1311,7 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 			}
 
 			for k, v := range obj.v {
-				iterObj(k, v)
+				iterObj(obj.keys[k], v)
 				err := blkInvoker.Invoke()
 				if errors.Is(err, ErrLoopBreak) {
 					break
