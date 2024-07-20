@@ -1069,12 +1069,30 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("invalid rhs operand: %w", err)
 	}
 
+	if _, ok := c.exprGen.vars.LookupRegister(name); !ok {
+		if node.AugmentedOp != nil {
+			return nil, fmt.Errorf("name '%s' is not defined", name)
+		}
+	}
+
 	scope, reg := c.exprGen.vars.Register(name)
 
 	return invoker(func() error {
 		v, err := reval.Eval()
 		if err != nil {
 			return err
+		}
+
+		if node.AugmentedOp != nil {
+			lval, ok := scope.GetVar(reg)
+			if !ok {
+				panic("unreachable")
+			}
+
+			v, err = evalBinary(*node.AugmentedOp, lval, v)
+			if err != nil {
+				return err
+			}
 		}
 
 		scope.DefineVar(reg, v)

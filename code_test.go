@@ -1,7 +1,6 @@
 package easylang
 
 import (
-	"io"
 	"math/big"
 	"testing"
 
@@ -16,15 +15,6 @@ func mustFloat(v string) *big.Float {
 		panic(err)
 	}
 	return r
-}
-
-func mustReprVar(v Variant) string {
-	b, err := io.ReadAll(v.MemReader())
-	if err != nil {
-		panic(err)
-	}
-
-	return string(b)
 }
 
 func TestExprCode(t *testing.T) {
@@ -923,6 +913,7 @@ func TestStmtCode(t *testing.T) {
 		Name           string
 		Input          string
 		IsCompileError bool
+		IsRuntimeError bool
 		ExpectedVar    func(name string, is *assert.Assertions, vars *Vars)
 	}{
 		{
@@ -949,6 +940,49 @@ func TestStmtCode(t *testing.T) {
 
 				is.Equal(s.String(), "hello")
 			},
+		},
+		{
+			Name: "Stmt_Assign_Augmented",
+			Input: `
+				foo = "hello"
+				foo += " world"
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("foo")
+				if !ok {
+					is.Fail("register foo not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var foo not found", name)
+					return
+				}
+
+				s, ok := v.(*VariantString)
+				if !ok {
+					is.Fail("var foo is not string", name)
+					return
+				}
+
+				is.Equal(s.String(), "hello world")
+			},
+		},
+		{
+			Name: "Stmt_Assign_Augmented_NameNotDefined",
+			Input: `
+				foo += " world"
+			`,
+			IsCompileError: true,
+		},
+		{
+			Name: "Stmt_Assign_Augmented_BadType",
+			Input: `
+				foo = 1
+				foo += " world"
+			`,
+			IsRuntimeError: true,
 		},
 		{
 			Name: "Stmt_If_Simple",
@@ -1584,6 +1618,11 @@ func TestStmtCode(t *testing.T) {
 
 		if err != nil {
 			is.Fail(err.Error(), testCase.Name)
+			continue
+		}
+
+		if testCase.IsRuntimeError {
+			assert.Error(t, invoker.Invoke(), testCase.Name)
 			continue
 		}
 

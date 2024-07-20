@@ -195,6 +195,17 @@ func (vars *Vars) Register(name string) (*VarScope, Register) {
 	return vars.LastScope(), vars.LastScope().Register(name)
 }
 
+func (vars *Vars) LookupRegister(name string) (Register, bool) {
+	for _, scope := range vars.Locals {
+		r, ok := scope.LookupRegister(name)
+		if ok {
+			return r, ok
+		}
+	}
+
+	return vars.Global.LookupRegister(name)
+}
+
 func (vars *Vars) SetOrDefineVariable(name Register, value Variant) {
 	if setter, ok := vars.setter(name); ok {
 		setter(value)

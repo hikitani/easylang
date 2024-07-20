@@ -4,6 +4,8 @@ char = /* any char except newline */.
 newline = `\n` .
 letter = "a" ... "z" | "A" ... "Z" | "_" .
 decimal_digit = "0" ... "9" .
+octal_digit = "0" ... "7" .
+hex_digit = decimal_digit | "a" ... "f" | "A" ... "F" .
 binary_digit = "0" | "1" .
 
 lexical elements
@@ -12,9 +14,11 @@ comment = "#" .
 ident = letter { letter | decimal_digit } .
 ident_list = ident { "," ident } .
 decimal_lit = "0" | ("1" .. "9") { decimal_digit } .
-binary_lit = "0b" { binary_digit } .
+binary_lit = ("0b" | "0B") binary_digit .
+octal_lit = ("0o" | "0O") octal_digit .
+hex_lit = ("0x" | "0X") hex_digit .
 string_lit = `"` { char } `"` .
-int_lit = decimal_lit | binary_lit .
+int_lit = decimal_lit | binary_lit | octal_lit | hex_lit .
 
 expressions
 
@@ -54,4 +58,4 @@ block = "{" stmt_list "}" .
 if_stmt = "if" expr block [ "else" ( if_stmt | block ) ] .
 for_stmt = "for" ident_list "in" expr block .
 while_stmt = "while" expr block .
-assign_stmt = expr_list "=" expr_list .
+assign_stmt = expr_list [ add_op | mul_op ] "=" expr_list .

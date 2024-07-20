@@ -47,6 +47,7 @@ type VarID uint64
 type Variant interface {
 	Type() VarType
 	MemReader() io.Reader
+	String() string
 }
 
 func MustVariantCast[T Variant](v Variant) T {
@@ -84,6 +85,10 @@ func (v *VariantNone) Type() VarType {
 	return TypeNone
 }
 
+func (v *VariantNone) String() string {
+	return "none"
+}
+
 type VariantBool struct {
 	v bool
 }
@@ -97,6 +102,14 @@ func (v *VariantBool) MemReader() io.Reader {
 
 func (v *VariantBool) Type() VarType {
 	return TypeBool
+}
+
+func (v *VariantBool) String() string {
+	if v.v {
+		return "true"
+	}
+
+	return "false"
 }
 
 type VariantNum struct {
@@ -184,6 +197,10 @@ func (v *VariantNum) Type() VarType {
 	return TypeNum
 }
 
+func (v *VariantNum) String() string {
+	return v.v.String()
+}
+
 type VariantString struct {
 	v string
 }
@@ -246,9 +263,39 @@ func (v *VariantArray) Type() VarType {
 	return TypeArray
 }
 
+func (v *VariantArray) String() string {
+	var sb strings.Builder
+	sb.WriteByte('[')
+
+	for i, el := range v.v {
+		sb.WriteString(el.String())
+		if i != len(v.v)-1 {
+			sb.WriteString(", ")
+		}
+	}
+
+	sb.WriteByte(']')
+	return sb.String()
+}
+
 type VariantObject struct {
 	v    map[string]Variant
 	keys map[string]Variant
+}
+
+func (v *VariantObject) Get(key Variant) (val Variant, err error) {
+	kb, err := io.ReadAll(key.MemReader())
+	if err != nil {
+		return nil, fmt.Errorf("%s is not hashable", key.Type())
+	}
+
+	var ok bool
+	val, ok = v.v[string(kb)]
+	if !ok {
+		return nil, errors.New("key not found")
+	}
+
+	return val, nil
 }
 
 func (obj *VariantObject) Set(k, v Variant) error {
@@ -285,23 +332,28 @@ func (v *VariantObject) MemReader() io.Reader {
 	return &r
 }
 
-func (v *VariantObject) Get(key Variant) (val Variant, err error) {
-	kb, err := io.ReadAll(key.MemReader())
-	if err != nil {
-		return nil, fmt.Errorf("%s is not hashable", key.Type())
-	}
-
-	var ok bool
-	val, ok = v.v[string(kb)]
-	if !ok {
-		return nil, errors.New("key not found")
-	}
-
-	return val, nil
-}
-
 func (v *VariantObject) Type() VarType {
 	return TypeObject
+}
+
+func (v *VariantObject) String() string {
+	var sb strings.Builder
+	sb.WriteByte('{')
+
+	i := 0
+	for k := range v.keys {
+		key, val := v.keys[k], v.v[k]
+
+		sb.WriteString(key.String() + ": " + val.String())
+		if i != len(v.keys)-1 {
+			sb.WriteString(", ")
+		}
+
+		i++
+	}
+
+	sb.WriteByte('}')
+	return sb.String()
 }
 
 type VariantFunc struct {
@@ -318,6 +370,10 @@ func (v *VariantFunc) MemReader() io.Reader {
 
 func (v *VariantFunc) Type() VarType {
 	return TypeFunc
+}
+
+func (v *VariantFunc) String() string {
+	return "function"
 }
 
 func VariantsIsDeepEqual(lval, rval Variant) bool {

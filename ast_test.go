@@ -384,6 +384,30 @@ func TestStmt(t *testing.T) {
 		},
 		{
 			Code: `
+			a += 1
+			`,
+			Expected: ProgramFile{
+				List: &[]*Stmt{
+					{
+						Expr: &ExprStmt{
+							X: Expr{UnaryExpr: UnaryExpr{Operand: Operand{
+								Name: &Ident{Name: "a"},
+							}}},
+							AugmentedOp: ptr("+"),
+							AssignX: &Expr{
+								UnaryExpr: UnaryExpr{Operand: Operand{Literal: &Literal{
+									Basic: &BasicLit{
+										Number: ptr("1"),
+									},
+								}}},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Code: `
 			if a < b {
 				a = b
 			} else if b < a {

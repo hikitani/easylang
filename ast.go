@@ -72,7 +72,7 @@ type Expr struct {
 
 type BinaryExpr struct {
 	Node
-	Op   string      `EOL* @(OpBinaryPrior1 | OpBinaryPrior2) EOL*`
+	Op   string      `EOL* @(OpBinaryPrior1 | OpBinaryPrior2 | OpBinaryArith) EOL*`
 	X    UnaryExpr   `@@`
 	Next *BinaryExpr `@@?`
 }
@@ -149,8 +149,9 @@ type Stmt struct {
 
 type ExprStmt struct {
 	Node
-	X       Expr  `@@`
-	AssignX *Expr `( "=" @@ )?`
+	X           Expr    `@@`
+	AugmentedOp *string `( @OpBinaryArith? `
+	AssignX     *Expr   `  "=" @@ )?`
 }
 
 type BlockStmt struct {

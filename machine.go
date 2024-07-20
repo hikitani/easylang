@@ -7,6 +7,11 @@ import (
 	"github.com/alecthomas/participle/v2"
 )
 
+var parser = participle.MustBuild[ProgramFile](
+	participle.Lexer(lexdef),
+	participle.Elide("Comment", "Whitespace"),
+)
+
 type Machine struct {
 	vars   *Vars
 	parser *participle.Parser[ProgramFile]
@@ -26,17 +31,9 @@ func (m *Machine) Compile(f io.Reader) (StmtInvoker, error) {
 	return invoker, nil
 }
 
-func New() (*Machine, error) {
-	parser, err := participle.Build[ProgramFile](
-		participle.Lexer(lexdef),
-		participle.Elide("Comment", "Whitespace"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("build parser: %w", err)
-	}
-
+func New() *Machine {
 	return &Machine{
 		vars:   NewVars(),
 		parser: parser,
-	}, nil
+	}
 }
