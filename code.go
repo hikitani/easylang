@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/hikitani/easylang/variant"
 )
 
 var (
@@ -20,18 +22,18 @@ type ExprCodeGenerator[T Node] interface {
 }
 
 type ExprEvaler interface {
-	Eval() (Variant, error)
+	Eval() (variant.Iface, error)
 }
 
 type exprCodeFunc struct {
-	fn func() (Variant, error)
+	fn func() (variant.Iface, error)
 }
 
-func (c *exprCodeFunc) Eval() (Variant, error) {
+func (c *exprCodeFunc) Eval() (variant.Iface, error) {
 	return c.fn()
 }
 
-func evaler(fn func() (Variant, error)) ExprEvaler {
+func evaler(fn func() (variant.Iface, error)) ExprEvaler {
 	return &exprCodeFunc{fn: fn}
 }
 
@@ -61,8 +63,8 @@ func (ec *BasicLitCodeGen) CodeGen(node *BasicLit) (ExprEvaler, error) {
 			return nil, fmt.Errorf("bad parser: failed to parse number, %w", err)
 		}
 
-		return evaler(func() (Variant, error) {
-			return NewVarNum(num), nil
+		return evaler(func() (variant.Iface, error) {
+			return variant.NewNum(num), nil
 		}), nil
 	}
 
@@ -143,8 +145,8 @@ func (ec *BasicLitCodeGen) CodeGen(node *BasicLit) (ExprEvaler, error) {
 			atEsc = false
 		}
 
-		return evaler(func() (Variant, error) {
-			return NewVarString(string(runes)), nil
+		return evaler(func() (variant.Iface, error) {
+			return variant.NewString(string(runes)), nil
 		}), nil
 	}
 
@@ -164,8 +166,8 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 		}
 
 		if len(elems.X) == 0 {
-			return evaler(func() (Variant, error) {
-				return NewVarArray(nil), nil
+			return evaler(func() (variant.Iface, error) {
+				return variant.NewArray(nil), nil
 			}), nil
 		}
 
@@ -183,14 +185,14 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 			evals = append(evals, el)
 		}
 
-		return evaler(func() (Variant, error) {
-			arr := NewVarArray(make([]Variant, 0, len(evals)))
+		return evaler(func() (variant.Iface, error) {
+			arr := variant.NewArray(make([]variant.Iface, 0, len(evals)))
 			for i, eval := range evals {
 				v, err := eval.Eval()
 				if err != nil {
 					return nil, fmt.Errorf("cannot evaluate expression of element %d of array: %w", i+1, err)
 				}
-				arr.v = append(arr.v, v)
+				arr.Append(v)
 			}
 
 			return arr, nil
@@ -204,8 +206,8 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 		}
 
 		if len(items.X) == 0 {
-			return evaler(func() (Variant, error) {
-				return MustNewVarObject(nil, nil), nil
+			return evaler(func() (variant.Iface, error) {
+				return variant.MustNewObject(nil, nil), nil
 			}), nil
 		}
 
@@ -228,8 +230,8 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 			kvEvals = append(kvEvals, [2]ExprEvaler{keyEval, valEval})
 		}
 
-		return evaler(func() (Variant, error) {
-			keys, vals := make([]Variant, 0, len(kvEvals)), make([]Variant, 0, len(kvEvals))
+		return evaler(func() (variant.Iface, error) {
+			keys, vals := make([]variant.Iface, 0, len(kvEvals)), make([]variant.Iface, 0, len(kvEvals))
 			for i, kv := range kvEvals {
 				keyEval, valEval := kv[0], kv[1]
 				key, err := keyEval.Eval()
@@ -246,7 +248,7 @@ func (c *CompositeLitCodeGen) CodeGen(node *CompositeLit) (ExprEvaler, error) {
 				vals = append(vals, val)
 			}
 
-			return MustNewVarObject(keys, vals), nil
+			return variant.MustNewObject(keys, vals), nil
 		}), nil
 	}
 
@@ -290,20 +292,20 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 		if IsConstValue(name) {
 			switch name {
 			case ConstValueNone:
-				return evaler(func() (Variant, error) {
-					return NewVarNone(), nil
+				return evaler(func() (variant.Iface, error) {
+					return variant.NewNone(), nil
 				}), nil
 			case ConstValueTrue:
-				return evaler(func() (Variant, error) {
-					return NewVarBool(true), nil
+				return evaler(func() (variant.Iface, error) {
+					return variant.NewBool(true), nil
 				}), nil
 			case ConstValueFalse:
-				return evaler(func() (Variant, error) {
-					return NewVarBool(false), nil
+				return evaler(func() (variant.Iface, error) {
+					return variant.NewBool(false), nil
 				}), nil
 			case ConstValueInf:
-				return evaler(func() (Variant, error) {
-					return NewVarNum(new(big.Float).SetInf(false)), nil
+				return evaler(func() (variant.Iface, error) {
+					return variant.NewNum(new(big.Float).SetInf(false)), nil
 				}), nil
 			}
 
@@ -316,7 +318,7 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 
 		scope, reg := c.exprGen.vars.Register(name)
 
-		eval = evaler(func() (Variant, error) {
+		eval = evaler(func() (variant.Iface, error) {
 			v, ok := scope.GetVar(reg)
 			if !ok {
 				return nil, fmt.Errorf("variable %s not defined", name)
@@ -378,18 +380,18 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 			idxEvals = append(idxEvals, idxEval)
 		}
 
-		eval = evaler(func() (Variant, error) {
+		eval = evaler(func() (variant.Iface, error) {
 			prev, err := c.prevEval.Eval()
 			if err != nil {
 				return nil, err
 			}
 
 			switch prev.Type() {
-			case TypeArray:
+			case variant.TypeArray:
 				if len(idxEvals) != 1 {
 					return nil, fmt.Errorf("array indexator must have 1 argument")
 				}
-				arr := MustVariantCast[*VariantArray](prev)
+				arr := variant.MustCast[*variant.Array](prev)
 
 				idxEval := idxEvals[0]
 				idx, err := idxEval.Eval()
@@ -397,11 +399,11 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 					return nil, fmt.Errorf("cannot evaluate index: %w", err)
 				}
 
-				if idx.Type() != TypeNum {
+				if idx.Type() != variant.TypeNum {
 					return nil, fmt.Errorf("index must be number, got %s", idx.Type())
 				}
 
-				num, err := MustVariantCast[*VariantNum](idx).AsInt64()
+				num, err := variant.MustCast[*variant.Num](idx).AsInt64()
 				if err != nil {
 					return nil, fmt.Errorf("cannot to represent number as unsigned integer: %w", err)
 				}
@@ -412,9 +414,9 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 				}
 
 				return val, nil
-			case TypeObject:
-				obj := MustVariantCast[*VariantObject](prev)
-				var res Variant
+			case variant.TypeObject:
+				obj := variant.MustCast[*variant.Object](prev)
+				var res variant.Iface
 				for i, idxEval := range idxEvals {
 					idx, err := idxEval.Eval()
 					if err != nil {
@@ -427,11 +429,11 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 					}
 
 					if i != len(idxEvals)-1 {
-						if v.Type() != TypeObject {
+						if v.Type() != variant.TypeObject {
 							return nil, fmt.Errorf("value at index %d unsupports indexator (expected object, got %s)", i, v.Type())
 						}
 
-						obj = MustVariantCast[*VariantObject](v)
+						obj = variant.MustCast[*variant.Object](v)
 					} else {
 						res = v
 					}
@@ -459,18 +461,18 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 			argEvals = append(argEvals, argEval)
 		}
 
-		eval = evaler(func() (Variant, error) {
+		eval = evaler(func() (variant.Iface, error) {
 			prev, err := c.prevEval.Eval()
 			if err != nil {
 				return nil, err
 			}
 
-			if prev.Type() != TypeFunc {
+			if prev.Type() != variant.TypeFunc {
 				return nil, fmt.Errorf("unsupported caller expression for %s (expected func)", prev.Type())
 			}
 
-			fn := MustVariantCast[*VariantFunc](prev)
-			args := make([]Variant, 0, len(argEvals))
+			fn := variant.MustCast[*variant.Func](prev)
+			args := make([]variant.Iface, 0, len(argEvals))
 			for i, argEval := range argEvals {
 				arg, err := argEval.Eval()
 				if err != nil {
@@ -489,16 +491,16 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 			panic("expected selector, got nothing")
 		}
 
-		selVars := make([]*VariantString, 0, len(sels))
+		selVars := make([]*variant.String, 0, len(sels))
 		for i, sel := range sels {
-			var val *VariantString
+			var val *variant.String
 			switch {
 			case sel.Ident != nil:
 				if sel.Ident.Name == "" {
 					panic(fmt.Sprintf("bad primary expression: selector at %d position must be named", i+1))
 				}
 
-				val = NewVarString(sel.Ident.Name)
+				val = variant.NewString(sel.Ident.Name)
 			case sel.String != nil:
 				strEval, err := (&BasicLitCodeGen{}).CodeGen(&BasicLit{String: sel.String})
 				if err != nil {
@@ -510,24 +512,24 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 					panic(fmt.Sprintf("cannot evaluate selector at %d position: %s", i+1, err))
 				}
 
-				val = MustVariantCast[*VariantString](res)
+				val = variant.MustCast[*variant.String](res)
 			}
 
 			selVars = append(selVars, val)
 		}
 
-		eval = evaler(func() (Variant, error) {
+		eval = evaler(func() (variant.Iface, error) {
 			prev, err := c.prevEval.Eval()
 			if err != nil {
 				return nil, err
 			}
 
-			if prev.Type() != TypeObject {
+			if prev.Type() != variant.TypeObject {
 				return nil, fmt.Errorf("unsupported selector for %s (expected object)", prev.Type())
 			}
 
-			obj := MustVariantCast[*VariantObject](prev)
-			var res Variant
+			obj := variant.MustCast[*variant.Object](prev)
+			var res variant.Iface
 			for i, sel := range selVars {
 				v, err := obj.Get(sel)
 				if err != nil {
@@ -535,11 +537,11 @@ func (c *PrimaryExprCodeGen) CodeGen(node *PrimaryExpr) (eval ExprEvaler, _ erro
 				}
 
 				if i != len(selVars)-1 {
-					if v.Type() != TypeObject {
+					if v.Type() != variant.TypeObject {
 						return nil, fmt.Errorf("unsupported selector %s for %s (expected object)", selVars[i+1], v.Type())
 					}
 
-					obj = MustVariantCast[*VariantObject](v)
+					obj = variant.MustCast[*variant.Object](v)
 				} else {
 					res = v
 				}
@@ -582,32 +584,32 @@ func (c *UnaryExprCodeGen) CodeGen(node *UnaryExpr) (ExprEvaler, error) {
 	op := *node.UnaryOp
 	switch op {
 	case "-":
-		return evaler(func() (Variant, error) {
+		return evaler(func() (variant.Iface, error) {
 			v, err := operandEval.Eval()
 			if err != nil {
 				return nil, err
 			}
 
-			if v.Type() != TypeNum {
+			if v.Type() != variant.TypeNum {
 				return nil, fmt.Errorf("%s doesn't support unary operator '-' (expected number)", v.Type())
 			}
 
-			num := MustVariantCast[*VariantNum](v)
-			return NewVarNum(new(big.Float).Neg(num.v)), nil
+			num := variant.MustCast[*variant.Num](v)
+			return num.Neg(), nil
 		}), nil
 	case "not":
-		return evaler(func() (Variant, error) {
+		return evaler(func() (variant.Iface, error) {
 			v, err := operandEval.Eval()
 			if err != nil {
 				return nil, err
 			}
 
-			if v.Type() != TypeBool {
+			if v.Type() != variant.TypeBool {
 				return nil, fmt.Errorf("%s doesn't support unary operator 'not' (expected bool)", v.Type())
 			}
 
-			b := MustVariantCast[*VariantBool](v)
-			return NewVarBool(!b.v), nil
+			b := variant.MustCast[*variant.Bool](v)
+			return variant.NewBool(!b.Bool()), nil
 		}), nil
 	}
 
@@ -650,8 +652,8 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		return res
 	}
 
-	prefngen := func(regs []ScopeAndReg) func(vargs []Variant) error {
-		return func(vargs []Variant) error {
+	prefngen := func(regs []ScopeAndReg) func(vargs []variant.Iface) error {
+		return func(vargs []variant.Iface) error {
 			if len(vargs) != len(args.X) {
 				return fmt.Errorf("expected arguments %d, got %d", len(args.X), len(vargs))
 			}
@@ -674,8 +676,8 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 			return nil, fmt.Errorf("bad function: invalid expression: %w", err)
 		}
 
-		return evaler(func() (Variant, error) {
-			return NewVarFunc(func(vargs []Variant) (Variant, error) {
+		return evaler(func() (variant.Iface, error) {
+			return variant.NewFunc(func(vargs []variant.Iface) (variant.Iface, error) {
 				if err := prefn(vargs); err != nil {
 					return nil, err
 				}
@@ -692,8 +694,8 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 			return nil, fmt.Errorf("bad function: invalid block statement: %w", err)
 		}
 
-		return evaler(func() (Variant, error) {
-			return NewVarFunc(func(vargs []Variant) (Variant, error) {
+		return evaler(func() (variant.Iface, error) {
+			return variant.NewFunc(func(vargs []variant.Iface) (variant.Iface, error) {
 				if err := prefn(vargs); err != nil {
 					return nil, err
 				}
@@ -723,7 +725,7 @@ func (c *BlockExprCodeGen) CodeGen(node *BlockExpr) (ExprEvaler, error) {
 		return nil, fmt.Errorf("bad block expression: invalid block statement: %w", err)
 	}
 
-	return evaler(func() (Variant, error) {
+	return evaler(func() (variant.Iface, error) {
 		err := invoker.Invoke()
 		if err != nil && !errors.Is(err, ErrStmtFinished) {
 			return nil, err
@@ -775,7 +777,7 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 		return ops[i].prior > ops[j].prior
 	})
 
-	getVal := func(eval ExprEvaler, stack *[]Variant) (val Variant, err error) {
+	getVal := func(eval ExprEvaler, stack *[]variant.Iface) (val variant.Iface, err error) {
 		if eval == nil {
 			// front := (*stack)[0]
 			// *stack = (*stack)[1:]
@@ -793,9 +795,9 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 	}
 
 	stackCap := (len(ops) + 1) / 2
-	return evaler(func() (Variant, error) {
+	return evaler(func() (variant.Iface, error) {
 		evalMask := make([]bool, len(evals))
-		stack := make([]Variant, 0, stackCap)
+		stack := make([]variant.Iface, 0, stackCap)
 
 		var leval, reval ExprEvaler
 		for _, opinfo := range ops {
@@ -836,18 +838,17 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 	}), nil
 }
 
-func evalBinary(op string, lval, rval Variant) (Variant, error) {
-	if op == "+" && rval.Type() == TypeString && lval.Type() == TypeString {
-		rs, ls := MustVariantCast[*VariantString](rval), MustVariantCast[*VariantString](lval)
-		return NewVarString(ls.v + rs.v), nil
+func evalBinary(op string, lval, rval variant.Iface) (variant.Iface, error) {
+	if op == "+" && rval.Type() == variant.TypeString && lval.Type() == variant.TypeString {
+		rs, ls := variant.MustCast[*variant.String](rval), variant.MustCast[*variant.String](lval)
+		return variant.NewString(ls.String() + rs.String()), nil
 	}
 
-	if op == "+" && rval.Type() == TypeArray && lval.Type() == TypeArray {
-		rs, ls := MustVariantCast[*VariantArray](rval), MustVariantCast[*VariantArray](lval)
-		arr := make([]Variant, 0, len(rs.v)+len(ls.v))
-		arr = append(arr, ls.v...)
-		arr = append(arr, rs.v...)
-		return NewVarArray(arr), nil
+	if op == "+" && rval.Type() == variant.TypeArray && lval.Type() == variant.TypeArray {
+		rs, ls := variant.MustCast[*variant.Array](rval), variant.MustCast[*variant.Array](lval)
+		arr := variant.NewArray(ls.Slice())
+		arr.Append(rs.Slice()...)
+		return arr, nil
 	}
 
 	if IsCmpOp(op) {
@@ -858,15 +859,15 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 		b := false
 		switch op {
 		case "==":
-			b = VariantsIsDeepEqual(lval, rval)
+			b = variant.DeepEqual(lval, rval)
 		case "!=":
-			b = !VariantsIsDeepEqual(lval, rval)
+			b = !variant.DeepEqual(lval, rval)
 		case "<", "<=", ">", ">=":
-			if rval.Type() != TypeNum {
+			if rval.Type() != variant.TypeNum {
 				return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
 			}
 
-			lnum, rnum := MustVariantCast[*VariantNum](lval), MustVariantCast[*VariantNum](rval)
+			lnum, rnum := variant.MustCast[*variant.Num](lval), variant.MustCast[*variant.Num](rval)
 
 			switch op {
 			case "<":
@@ -884,26 +885,26 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 			return nil, fmt.Errorf("unknown operation '%s %s %s'", lval.Type(), op, rval.Type())
 		}
 
-		return NewVarBool(b), nil
+		return variant.NewBool(b), nil
 	}
 
 	if IsArithOp(op) {
-		if rval.Type() != TypeNum || lval.Type() != TypeNum {
+		if rval.Type() != variant.TypeNum || lval.Type() != variant.TypeNum {
 			return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
 		}
-		rnum, lnum := MustVariantCast[*VariantNum](rval), MustVariantCast[*VariantNum](lval)
+		rnum, lnum := variant.MustCast[*variant.Num](rval), variant.MustCast[*variant.Num](lval)
 		num := new(big.Float)
 		switch op {
 		case "+":
 			if lnum.IsInf() && rnum.IsInf() && lnum.Sign() != rnum.Sign() {
 				return nil, errors.New("op '+': addition of inf and inf with opposite signs")
 			}
-			num.Add(lnum.v, rnum.v)
+			num.Add(lnum.Value(), rnum.Value())
 		case "-":
 			if lnum.IsInf() && rnum.IsInf() && lnum.Sign() == rnum.Sign() {
 				return nil, errors.New("op '-': subtraction of inf from inf with equal signs")
 			}
-			num.Sub(lnum.v, rnum.v)
+			num.Sub(lnum.Value(), rnum.Value())
 		case "/":
 			if lnum.IsZero() && rnum.IsZero() {
 				return nil, errors.New("op '/': division of zero into zero")
@@ -911,14 +912,14 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 			if lnum.IsInf() && rnum.IsInf() {
 				return nil, errors.New("op '/': division of inf into inf")
 			}
-			num.Quo(lnum.v, rnum.v)
+			num.Quo(lnum.Value(), rnum.Value())
 		case "*":
 			if (lnum.IsZero() && rnum.IsInf()) || (lnum.IsInf() && rnum.IsZero()) {
 				return nil, errors.New("op '*': one operand is zero and the other operand an infinity")
 			}
-			num.Mul(lnum.v, rnum.v)
+			num.Mul(lnum.Value(), rnum.Value())
 		case "%":
-			if rnum.v.IsInf() {
+			if rnum.Value().IsInf() {
 				return nil, errors.New("op '%': modulus with inf")
 			}
 
@@ -926,12 +927,12 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 				return nil, errors.New("op '%': modulus with zero")
 			}
 
-			if lnum.v.IsInt() && rnum.v.IsInt() {
+			if lnum.Value().IsInt() && rnum.Value().IsInt() {
 				var x, y big.Int
-				lnum.v.Int(&x)
-				rnum.v.Int(&y)
+				lnum.Value().Int(&x)
+				rnum.Value().Int(&y)
 				num.SetInt(x.Mod(&x, &y))
-			} else if div := new(big.Float).Quo(lnum.v, rnum.v); div.IsInf() {
+			} else if div := new(big.Float).Quo(lnum.Value(), rnum.Value()); div.IsInf() {
 				num.Set(div)
 			} else {
 				// div = x / y
@@ -940,15 +941,15 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 				// 1. int(div)
 				divInt, _ := div.Int(nil)
 				// 2. int(div) * y
-				mul := new(big.Float).Mul(div.SetInt(divInt), rnum.v)
+				mul := new(big.Float).Mul(div.SetInt(divInt), rnum.Value())
 				// 3. x - int(div) * y
-				num.Sub(lnum.v, mul)
+				num.Sub(lnum.Value(), mul)
 
 				if lnum.Sign() < 0 {
 					if rnum.Sign() > 0 {
-						num.Add(rnum.v, num)
+						num.Add(rnum.Value(), num)
 					} else {
-						num.Add(mul.Neg(rnum.v), num)
+						num.Add(mul.Neg(rnum.Value()), num)
 					}
 				}
 			}
@@ -956,24 +957,24 @@ func evalBinary(op string, lval, rval Variant) (Variant, error) {
 			return nil, fmt.Errorf("unknown operation 'number %s number'", op)
 		}
 
-		return NewVarNum(num), nil
+		return variant.NewNum(num), nil
 	}
 
 	if IsPredicateOp(op) {
-		if rval.Type() != TypeBool || lval.Type() != TypeBool {
+		if rval.Type() != variant.TypeBool || lval.Type() != variant.TypeBool {
 			return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
 		}
-		rb, lb := MustVariantCast[*VariantBool](rval), MustVariantCast[*VariantBool](lval)
+		rb, lb := variant.MustCast[*variant.Bool](rval), variant.MustCast[*variant.Bool](lval)
 		var b bool
 		switch op {
 		case "and":
-			b = lb.v && rb.v
+			b = lb.Bool() && rb.Bool()
 		case "or":
-			b = lb.v || rb.v
+			b = lb.Bool() || rb.Bool()
 		default:
 			return nil, fmt.Errorf("unknown operation 'bool %s bool'", op)
 		}
-		return NewVarBool(b), nil
+		return variant.NewBool(b), nil
 	}
 
 	return nil, fmt.Errorf("unknown operation '%s %s %s'", lval.Type(), op, rval.Type())
@@ -1004,13 +1005,13 @@ type ReturnStmtCodeGen struct {
 }
 
 func (c *ReturnStmtCodeGen) CodeGen(node *ReturnStmt) (StmtInvoker, error) {
-	ret := func(v Variant) error {
+	ret := func(v variant.Iface) error {
 		c.vars.SetReturn(v)
 		return ErrStmtFinished
 	}
 	if node.ReturnExpr == nil {
 		return invoker(func() error {
-			return ret(&VariantNone{})
+			return ret(variant.NewNone())
 		}), nil
 	}
 
@@ -1214,12 +1215,12 @@ func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
 				return err
 			}
 
-			if cond.Type() != TypeBool {
+			if cond.Type() != variant.TypeBool {
 				return errors.New("condition expression must be bool")
 			}
 
-			b := MustVariantCast[*VariantBool](cond)
-			if !b.v {
+			b := variant.MustCast[*variant.Bool](cond)
+			if !b.Bool() {
 				return nil
 			}
 
@@ -1265,28 +1266,28 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("bad for statement: invalid block statement: %w", err)
 	}
 
-	iterArr := func(i int, el Variant) {}
-	iterObj := func(k Variant, el Variant) {}
+	iterArr := func(i int, el variant.Iface) {}
+	iterObj := func(k variant.Iface, el variant.Iface) {}
 
 	scope := blkVars.LastScope()
 	switch len(varnames.X) {
 	case 0:
 	case 1:
 		r1 := scope.Register(varnames.X[0].Name)
-		iterArr = func(_ int, el Variant) {
+		iterArr = func(_ int, el variant.Iface) {
 			scope.DefineVar(r1, el)
 		}
-		iterObj = func(k Variant, _ Variant) {
+		iterObj = func(k variant.Iface, _ variant.Iface) {
 			scope.DefineVar(r1, k)
 		}
 	case 2:
 		r1 := scope.Register(varnames.X[0].Name)
 		r2 := scope.Register(varnames.X[1].Name)
-		iterArr = func(i int, el Variant) {
-			scope.DefineVar(r1, NewVarInt(i))
+		iterArr = func(i int, el variant.Iface) {
+			scope.DefineVar(r1, variant.Int(i))
 			scope.DefineVar(r2, el)
 		}
-		iterObj = func(k Variant, el Variant) {
+		iterObj = func(k variant.Iface, el variant.Iface) {
 			scope.DefineVar(r1, k)
 			scope.DefineVar(r2, el)
 		}
@@ -1301,13 +1302,13 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		}
 
 		switch v.Type() {
-		case TypeArray:
-			arr := MustVariantCast[*VariantArray](v)
+		case variant.TypeArray:
+			arr := variant.MustCast[*variant.Array](v)
 			if arr.Len() == 0 {
 				return nil
 			}
 
-			for i, el := range arr.v {
+			for i, el := range arr.Slice() {
 				iterArr(i, el)
 				err := blkInvoker.Invoke()
 				if errors.Is(err, ErrLoopBreak) {
@@ -1322,27 +1323,28 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 					return err
 				}
 			}
-		case TypeObject:
-			obj := MustVariantCast[*VariantObject](v)
+		case variant.TypeObject:
+			obj := variant.MustCast[*variant.Object](v)
 			if obj.Len() == 0 {
 				return nil
 			}
 
-			for k, v := range obj.v {
-				iterObj(obj.keys[k], v)
-				err := blkInvoker.Invoke()
+			var err error
+			obj.IterFunc(func(k, v variant.Iface) (cont bool, brk bool) {
+				iterObj(k, v)
+				err = blkInvoker.Invoke()
 				if errors.Is(err, ErrLoopBreak) {
-					break
+					brk = true
+					return
 				}
 
 				if errors.Is(err, ErrLoopContinue) {
-					continue
+					cont = true
+					return
 				}
 
-				if err != nil {
-					return err
-				}
-			}
+				return
+			})
 		default:
 			return fmt.Errorf("%s not iterable (expected array or object)", v.Type())
 		}
@@ -1389,12 +1391,12 @@ func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
 			return err
 		}
 
-		if cond.Type() != TypeBool {
+		if cond.Type() != variant.TypeBool {
 			return errors.New("condition expression must be bool")
 		}
 
-		b := MustVariantCast[*VariantBool](cond)
-		if b.v {
+		b := variant.MustCast[*variant.Bool](cond)
+		if b.Bool() {
 			return blkInvoker.Invoke()
 		}
 

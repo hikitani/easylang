@@ -1,5 +1,7 @@
 package easylang
 
+import "github.com/hikitani/easylang/variant"
+
 type Register uint32
 
 const (
@@ -24,32 +26,32 @@ func (v *varmapper) Register(name string) Register {
 
 type VarScope struct {
 	r varmapper
-	m map[Register]Variant
+	m map[Register]variant.Iface
 }
 
 func NewVarScope() *VarScope {
 	return &VarScope{
 		r: varmapper{m: map[string]Register{}, i: 1}, // i = 0 reserved for return value
-		m: map[Register]Variant{},
+		m: map[Register]variant.Iface{},
 	}
 }
 
-func (scope *VarScope) setter(name Register) (func(v Variant), bool) {
+func (scope *VarScope) setter(name Register) (func(v variant.Iface), bool) {
 	if _, ok := scope.GetVar(name); ok {
-		return func(v Variant) { scope.DefineVar(name, v) }, true
+		return func(v variant.Iface) { scope.DefineVar(name, v) }, true
 	}
 
 	return nil, false
 }
 
-func (scope *VarScope) SetReturn(v Variant) {
+func (scope *VarScope) SetReturn(v variant.Iface) {
 	scope.DefineVar(RegisterReturn, v)
 }
 
-func (scope *VarScope) GetReturn() Variant {
+func (scope *VarScope) GetReturn() variant.Iface {
 	v, ok := scope.GetVar(RegisterReturn)
 	if !ok {
-		return &VariantNone{}
+		return &variant.None{}
 	}
 
 	return v
@@ -59,12 +61,12 @@ func (scope *VarScope) Register(name string) Register {
 	return scope.r.Register(name)
 }
 
-func (scope *VarScope) GetVar(r Register) (Variant, bool) {
+func (scope *VarScope) GetVar(r Register) (variant.Iface, bool) {
 	v, ok := scope.m[r]
 	return v, ok
 }
 
-func (scope *VarScope) VarByName(name string) Variant {
+func (scope *VarScope) VarByName(name string) variant.Iface {
 	r, ok := scope.r.m[name]
 	if !ok {
 		panic("var '" + name + "' not found")
@@ -78,7 +80,7 @@ func (scope *VarScope) LookupRegister(name string) (Register, bool) {
 	return r, ok
 }
 
-func (scope *VarScope) DefineVar(r Register, value Variant) {
+func (scope *VarScope) DefineVar(r Register, value variant.Iface) {
 	scope.m[r] = value
 }
 
@@ -91,7 +93,7 @@ type Vars struct {
 	debugChilds []*Vars
 }
 
-func (vars *Vars) setter(name Register) (func(v Variant), bool) {
+func (vars *Vars) setter(name Register) (func(v variant.Iface), bool) {
 	for i := len(vars.Locals) - 1; i >= 0; i-- {
 		local := vars.Locals[i]
 
@@ -133,7 +135,7 @@ func (vars *Vars) Unscope() *Vars {
 	}
 }
 
-func (vars *Vars) SetReturn(v Variant) {
+func (vars *Vars) SetReturn(v variant.Iface) {
 	if vars.ParentBlockScope != nil {
 		vars.ParentBlockScope.SetReturn(v)
 		return
@@ -142,7 +144,7 @@ func (vars *Vars) SetReturn(v Variant) {
 	vars.LastScope().SetReturn(v)
 }
 
-func (vars *Vars) GetVar(name Register) (Variant, bool) {
+func (vars *Vars) GetVar(name Register) (variant.Iface, bool) {
 	for i := len(vars.Locals) - 1; i >= 0; i-- {
 		local := vars.Locals[i]
 
@@ -163,11 +165,11 @@ func (vars *Vars) GetScope(level int) *VarScope {
 	return vars.Locals[level]
 }
 
-func (vars *Vars) DefineGlobalVariable(r Register, value Variant) {
+func (vars *Vars) DefineGlobalVariable(r Register, value variant.Iface) {
 	vars.Global.DefineVar(r, value)
 }
 
-func (vars *Vars) DefineVariable(r Register, value Variant) {
+func (vars *Vars) DefineVariable(r Register, value variant.Iface) {
 	if len(vars.Locals) == 0 {
 		vars.Global.DefineVar(r, value)
 		return
@@ -206,7 +208,7 @@ func (vars *Vars) LookupRegister(name string) (Register, bool) {
 	return vars.Global.LookupRegister(name)
 }
 
-func (vars *Vars) SetOrDefineVariable(name Register, value Variant) {
+func (vars *Vars) SetOrDefineVariable(name Register, value variant.Iface) {
 	if setter, ok := vars.setter(name); ok {
 		setter(value)
 		return

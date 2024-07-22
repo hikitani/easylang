@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/participle/v2"
+	"github.com/hikitani/easylang/variant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,7 @@ func TestExprCode(t *testing.T) {
 	tests := []struct {
 		Name           string
 		Input          string
-		Expected       Variant
+		Expected       variant.Iface
 		IsFunc         bool
 		IsCompileError bool
 		IsRuntimeError bool
@@ -36,7 +37,7 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "String",
 			Input:    `"Hello\n\t\U0001f3b1WORLD"`,
-			Expected: NewVarString("Hello\n\t🎱WORLD"),
+			Expected: variant.NewString("Hello\n\t🎱WORLD"),
 		},
 		{
 			Name:           "String_InvalidBackslash",
@@ -66,47 +67,47 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Number_Int",
 			Input:    `007`,
-			Expected: NewVarInt(7),
+			Expected: variant.Int(7),
 		},
 		{
 			Name:     "Number_Int_Neg",
 			Input:    `-7`,
-			Expected: NewVarInt(-7),
+			Expected: variant.Int(-7),
 		},
 		{
 			Name:     "Number_Int_Underscore",
 			Input:    `10_000`,
-			Expected: NewVarInt(10_000),
+			Expected: variant.Int(10_000),
 		},
 		{
 			Name:     "Number_Int_Binary",
 			Input:    `0b101010`,
-			Expected: NewVarInt(0b101010),
+			Expected: variant.Int(0b101010),
 		},
 		{
 			Name:     "Number_Int_Octal",
 			Input:    `0o01234567`,
-			Expected: NewVarInt(0o01234567),
+			Expected: variant.Int(0o01234567),
 		},
 		{
 			Name:     "Number_Int_Hex",
 			Input:    `0xffaabb`,
-			Expected: NewVarInt(0xffaabb),
+			Expected: variant.Int(0xffaabb),
 		},
 		{
 			Name:     "Number_Float_Inf",
 			Input:    `inf`,
-			Expected: NewVarNum(new(big.Float).SetInf(false)),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Number_Float_Neg_Inf",
 			Input:    `-inf`,
-			Expected: NewVarNum(new(big.Float).SetInf(true)),
+			Expected: variant.NegInf(),
 		},
 		{
 			Name:     "Number_Float",
 			Input:    `1_000.0203_405`,
-			Expected: NewVarNum(mustFloat("1000.0203405")),
+			Expected: variant.NewNum(mustFloat("1000.0203405")),
 		},
 		{
 			Name:   "IsFunc",
@@ -116,14 +117,14 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Array_Empty",
 			Input:    `[]`,
-			Expected: NewVarArray(nil),
+			Expected: variant.NewArray(nil),
 		},
 		{
 			Name:  "Array_Filled",
 			Input: `[1, 2, "hello", [1,]]`,
-			Expected: NewVarArray([]Variant{
-				NewVarInt(1), NewVarInt(2),
-				NewVarString("hello"), NewVarArray([]Variant{NewVarInt(1)}),
+			Expected: variant.NewArray([]variant.Iface{
+				variant.Int(1), variant.Int(2),
+				variant.NewString("hello"), variant.NewArray([]variant.Iface{variant.Int(1)}),
 			}),
 		},
 		{
@@ -139,7 +140,7 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Object_Empty",
 			Input:    `{}`,
-			Expected: MustNewVarObject(nil, nil),
+			Expected: variant.MustNewObject(nil, nil),
 		},
 		{
 			Name: "Object_Filled",
@@ -148,15 +149,15 @@ func TestExprCode(t *testing.T) {
 				111: [],
 				[1, 2, 3]: {1: 2},
 			}`,
-			Expected: MustNewVarObject(
-				[]Variant{
-					NewVarString("hello"),
-					NewVarInt(111),
-					NewVarArray([]Variant{NewVarInt(1), NewVarInt(2), NewVarInt(3)})},
-				[]Variant{
-					NewVarString("world"),
-					NewVarArray(nil),
-					MustNewVarObject([]Variant{NewVarInt(1)}, []Variant{NewVarInt(2)}),
+			Expected: variant.MustNewObject(
+				[]variant.Iface{
+					variant.NewString("hello"),
+					variant.Int(111),
+					variant.NewArray([]variant.Iface{variant.Int(1), variant.Int(2), variant.Int(3)})},
+				[]variant.Iface{
+					variant.NewString("world"),
+					variant.NewArray(nil),
+					variant.MustNewObject([]variant.Iface{variant.Int(1)}, []variant.Iface{variant.Int(2)}),
 				},
 			),
 		},
@@ -191,17 +192,17 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "ConstNone",
 			Input:    `none`,
-			Expected: NewVarNone(),
+			Expected: variant.NewNone(),
 		},
 		{
 			Name:     "ConstBool_True",
 			Input:    `true`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "ConstBool_False",
 			Input:    `false`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:  "Var",
@@ -213,12 +214,12 @@ func TestExprCode(t *testing.T) {
 							"foo": 1,
 						},
 					},
-					m: map[Register]Variant{
-						1: NewVarString("hello world"),
+					m: map[Register]variant.Iface{
+						1: variant.NewString("hello world"),
 					},
 				},
 			},
-			Expected: NewVarString("hello world"),
+			Expected: variant.NewString("hello world"),
 		},
 		{
 			Name:           "Var_invalid_NotDefined",
@@ -237,22 +238,22 @@ func TestExprCode(t *testing.T) {
 				b = 2
 				return a + b
 			}`,
-			Expected: NewVarInt(3),
+			Expected: variant.Int(3),
 		},
 		{
 			Name:     "BlockExpr_NoReturn",
 			Input:    `block {}`,
-			Expected: NewVarNone(),
+			Expected: variant.NewNone(),
 		},
 		{
 			Name:     "Func_Simple",
 			Input:    `(|| => 1 + 3)()`,
-			Expected: NewVarInt(4),
+			Expected: variant.Int(4),
 		},
 		{
 			Name:     "Func_Simple_WithArgs",
 			Input:    `(|a, b| => a + b)(1, 3)`,
-			Expected: NewVarInt(4),
+			Expected: variant.Int(4),
 		},
 		{
 			Name: "Func_WithBlock",
@@ -261,12 +262,12 @@ func TestExprCode(t *testing.T) {
 				b = 2
 				return a + b
 			})()`,
-			Expected: NewVarInt(3),
+			Expected: variant.Int(3),
 		},
 		{
 			Name:     "Func_WithBlock_NoReturn",
 			Input:    `(|| => {})()`,
-			Expected: NewVarNone(),
+			Expected: variant.NewNone(),
 		},
 		{
 			Name: "Func_WithBlock_WithArgs",
@@ -277,32 +278,32 @@ func TestExprCode(t *testing.T) {
 
 				return b
 			})(1, 3)`,
-			Expected: NewVarInt(3),
+			Expected: variant.Int(3),
 		},
 		{
 			Name:     "Unary_Neg",
 			Input:    `-1`,
-			Expected: NewVarInt(-1),
+			Expected: variant.Int(-1),
 		},
 		{
 			Name:     "Unary_Not",
 			Input:    `not true`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Primary_ArrayIndex",
 			Input:    `[1, 2, 3][0]`,
-			Expected: NewVarInt(1),
+			Expected: variant.Int(1),
 		},
 		{
 			Name:     "Primary_ArrayIndexExpr",
 			Input:    `[1, 2, 3][1 + 1]`,
-			Expected: NewVarInt(3),
+			Expected: variant.Int(3),
 		},
 		{
 			Name:     "Primary_ArrayIndex_Negative",
 			Input:    `[1, 2, 3][-1]`,
-			Expected: NewVarInt(3),
+			Expected: variant.Int(3),
 		},
 		{
 			Name:           "Primary_ArrayIndex_Multi",
@@ -342,17 +343,17 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Primary_ObjectIndex",
 			Input:    `{1: "hello"}[1]`,
-			Expected: NewVarString("hello"),
+			Expected: variant.NewString("hello"),
 		},
 		{
 			Name:     "Primary_ObjectMultiIndex",
 			Input:    `{1: {"foo": "hello"}}[1, "foo"]`,
-			Expected: NewVarString("hello"),
+			Expected: variant.NewString("hello"),
 		},
 		{
 			Name:     "Primary_ObjectMultiIndexV2",
 			Input:    `{1: {"foo": "hello"}}[1]["foo"]`,
-			Expected: NewVarString("hello"),
+			Expected: variant.NewString("hello"),
 		},
 		{
 			Name:           "Primary_ObjectIndex_InvalidElem",
@@ -392,12 +393,12 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Primary_Selector",
 			Input:    `{"foo": {"bar": "hello"}}.foo.bar`,
-			Expected: NewVarString("hello"),
+			Expected: variant.NewString("hello"),
 		},
 		{
 			Name:     "Primary_Selector_AsString",
 			Input:    `{"0foo": {"bar": "hello"}}."0foo".bar`,
-			Expected: NewVarString("hello"),
+			Expected: variant.NewString("hello"),
 		},
 		{
 			Name:           "Primary_Selector_NotFound",
@@ -407,12 +408,12 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_CmpOp_Less",
 			Input:    `1 < 2`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_Less_False",
 			Input:    `2 < 1`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:           "Binary_CmpOp_LessInvalid_DiffType",
@@ -422,17 +423,17 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_CmpOp_LessOrEq",
 			Input:    `1 <= 2`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_LessOrEq_False",
 			Input:    `2 <= 1`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_LessOrEq_Exact",
 			Input:    `2 <= 2`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:           "Binary_CmpOp_LessOrEqInvalid_DiffType",
@@ -442,12 +443,12 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_CmpOp_Greater",
 			Input:    `2 > 1`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_Greater_False",
 			Input:    `1 > 2`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:           "Binary_CmpOp_GreaterInvalid_DiffType",
@@ -457,17 +458,17 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_CmpOp_GreaterOrEq",
 			Input:    `2 >= 1`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_GreaterOrEq_False",
 			Input:    `1 >= 2`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_GreaterOrEq_Exact",
 			Input:    `2 >= 2`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:           "Binary_CmpOp_GreaterOrEqInvalid_DiffType",
@@ -477,113 +478,113 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_CmpOp_EqNum",
 			Input:    `2 == 2`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqNum_False",
 			Input:    `1 == 2`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqString",
 			Input:    `"hello" == "hello"`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqString_False",
 			Input:    `"hello" == "world"`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqNone",
 			Input:    `none == none`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqBool",
 			Input:    `true == true`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqBool_False",
 			Input:    `true == false`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqArray",
 			Input:    `[1, "2", true] == [1, "2", true]`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqArray_False",
 			Input:    `[1, "2", true] == [1, 0, true]`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqObject",
 			Input:    `{1: "hello", "foo": {true: false}} == {1: "hello", "foo": {true: false}}`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_EqObject_False",
 			Input:    `{1: "hello", "foo": {true: false}} == {}`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 
 		{
 			Name:     "Binary_CmpOp_NotEqNum",
 			Input:    `2 != 2`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqNum_True",
 			Input:    `1 != 2`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqString",
 			Input:    `"hello" != "hello"`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqString_True",
 			Input:    `"hello" != "world"`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqNone",
 			Input:    `none != none`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqBool",
 			Input:    `true != true`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqBool_True",
 			Input:    `true != false`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqArray",
 			Input:    `[1, "2", true] != [1, "2", true]`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqArray_True",
 			Input:    `[1, "2", true] != [1, 0, true]`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqObject",
 			Input:    `{1: "hello", "foo": {true: false}} != {1: "hello", "foo": {true: false}}`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_CmpOp_NotEqObject_True",
 			Input:    `{1: "hello", "foo": {true: false}} != {}`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:           "Binary_CmpOp_EqInvalid_DiffType",
@@ -599,28 +600,28 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_Concat_String",
 			Input:    `"hello" + "world"`,
-			Expected: NewVarString("helloworld"),
+			Expected: variant.NewString("helloworld"),
 		},
 		{
 			Name:     "Binary_Concat_Array",
 			Input:    `["hello"] + ["world"]`,
-			Expected: NewVarArray([]Variant{NewVarString("hello"), NewVarString("world")}),
+			Expected: variant.NewArray([]variant.Iface{variant.NewString("hello"), variant.NewString("world")}),
 		},
 
 		{
 			Name:     "Binary_ArithOp_Add",
 			Input:    `2 + 2`,
-			Expected: NewVarInt(4),
+			Expected: variant.Int(4),
 		},
 		{
 			Name:     "Binary_ArithOp_Add_Inf",
 			Input:    `inf + inf`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Add_InfAndNum",
 			Input:    `inf + 111`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:           "Binary_ArithOp_Add_Invalid",
@@ -630,17 +631,17 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_ArithOp_Sub",
 			Input:    `2 - 2`,
-			Expected: NewVarInt(0),
+			Expected: variant.Int(0),
 		},
 		{
 			Name:     "Binary_ArithOp_Sub_Inf",
 			Input:    `inf - -inf`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Sub_InfAndNum",
 			Input:    `inf - 111`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:           "Binary_ArithOp_Sub_Invalid",
@@ -650,32 +651,32 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_ArithOp_Quo",
 			Input:    `2 / 2`,
-			Expected: NewVarInt(1),
+			Expected: variant.Int(1),
 		},
 		{
 			Name:     "Binary_ArithOp_Quo_Inf",
 			Input:    `2 / 0`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Quo_NegInfInf",
 			Input:    `-2 / 0`,
-			Expected: NewVarNegInf(),
+			Expected: variant.NegInf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Quo_Zero",
 			Input:    `1 / inf`,
-			Expected: NewVarInt(0),
+			Expected: variant.Int(0),
 		},
 		{
 			Name:     "Binary_ArithOp_Quo_InfIntoNum",
 			Input:    `inf / 999`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Quo_NegInfIntoNum",
 			Input:    `-inf / 999`,
-			Expected: NewVarNegInf(),
+			Expected: variant.NegInf(),
 		},
 		{
 			Name:           "Binary_ArithOp_Quo_Invalid_ZeroIntoZero",
@@ -690,17 +691,17 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_ArithOp_Mul",
 			Input:    `2 * 3`,
-			Expected: NewVarInt(6),
+			Expected: variant.Int(6),
 		},
 		{
 			Name:     "Binary_ArithOp_Mul_Inf",
 			Input:    `2 * inf`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Mul_NegInf",
 			Input:    `2 * -inf`,
-			Expected: NewVarNegInf(),
+			Expected: variant.NegInf(),
 		},
 		{
 			Name:           "Binary_ArithOp_Mul_Invalid_ZeroAndInf",
@@ -710,32 +711,32 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_ArithOp_Mod_Int",
 			Input:    `4 % 3`,
-			Expected: NewVarInt(1),
+			Expected: variant.Int(1),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_NegX",
 			Input:    `-4 % 3`,
-			Expected: NewVarInt(2),
+			Expected: variant.Int(2),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_NegY",
 			Input:    `4 % -3`,
-			Expected: NewVarInt(1),
+			Expected: variant.Int(1),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_NegXY",
 			Input:    `-4 % -3`,
-			Expected: NewVarInt(2),
+			Expected: variant.Int(2),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_Inf",
 			Input:    `inf % 4`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_NegInf",
 			Input:    `-inf % 4`,
-			Expected: NewVarNegInf(),
+			Expected: variant.NegInf(),
 		},
 		{
 			Name:           "Binary_ArithOp_Mod_Int_InvalidInf",
@@ -759,7 +760,7 @@ func TestExprCode(t *testing.T) {
 
 				return diff < 0.000_000_000_000_000_01
 			}`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name: "Binary_ArithOp_Mod_Float_NegX",
@@ -773,7 +774,7 @@ func TestExprCode(t *testing.T) {
 
 				return diff < 0.000_000_000_000_000_01
 			}`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name: "Binary_ArithOp_Mod_Float_NegY",
@@ -787,7 +788,7 @@ func TestExprCode(t *testing.T) {
 
 				return diff < 0.000_000_000_000_000_01
 			}`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name: "Binary_ArithOp_Mod_Float_NegXY",
@@ -801,17 +802,17 @@ func TestExprCode(t *testing.T) {
 
 				return diff < 0.000_000_000_000_000_01
 			}`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_Inf",
 			Input:    `inf % 4`,
-			Expected: NewVarInf(),
+			Expected: variant.Inf(),
 		},
 		{
 			Name:     "Binary_ArithOp_Mod_Int_NegInf",
 			Input:    `-inf % 4`,
-			Expected: NewVarNegInf(),
+			Expected: variant.NegInf(),
 		},
 		{
 			Name:           "Binary_ArithOp_Mod_Float_InvalidZero",
@@ -827,22 +828,22 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:     "Binary_PredicateOp_And_True",
 			Input:    `true and true`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_PredicateOp_And_False",
 			Input:    `false and true`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 		{
 			Name:     "Binary_PredicateOp_Or_True",
 			Input:    `(true or true) and (true or false) and (false or true)`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 		{
 			Name:     "Binary_PredicateOp_Or_False",
 			Input:    `false and false`,
-			Expected: NewVarBool(false),
+			Expected: variant.False(),
 		},
 
 		{
@@ -861,7 +862,7 @@ func TestExprCode(t *testing.T) {
 				9. false or true = true
 			*/
 			Input:    `false or 2 * 2 - 4 % 3 * 2 / 2 + 1 == 4 and true`,
-			Expected: NewVarBool(true),
+			Expected: variant.True(),
 		},
 	}
 
@@ -894,10 +895,10 @@ func TestExprCode(t *testing.T) {
 		}
 
 		if testCase.IsFunc {
-			_, ok := v.(*VariantFunc)
+			_, ok := v.(*variant.Func)
 			assert.True(t, ok, testCase.Name)
 		} else {
-			assert.True(t, VariantsIsDeepEqual(testCase.Expected, v), testCase.Name)
+			assert.True(t, variant.DeepEqual(testCase.Expected, v), testCase.Name)
 		}
 	}
 }
@@ -932,7 +933,7 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantString)
+				s, ok := v.(*variant.String)
 				if !ok {
 					is.Fail("var foo is not string", name)
 					return
@@ -960,7 +961,7 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantString)
+				s, ok := v.(*variant.String)
 				if !ok {
 					is.Fail("var foo is not string", name)
 					return
@@ -1004,13 +1005,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				b, ok := v.(*VariantNum)
+				b, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var b is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(b, NewVarInt(2)))
+				is.True(variant.DeepEqual(b, variant.Int(2)))
 			},
 		},
 		{
@@ -1035,13 +1036,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				b, ok := v.(*VariantNum)
+				b, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var b is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(b, NewVarInt(2)))
+				is.True(variant.DeepEqual(b, variant.Int(2)))
 			},
 		},
 		{
@@ -1066,13 +1067,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				b, ok := v.(*VariantNum)
+				b, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var b is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(b, NewVarInt(0)))
+				is.True(variant.DeepEqual(b, variant.Int(0)))
 			},
 		},
 		{
@@ -1097,13 +1098,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				b, ok := v.(*VariantNum)
+				b, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var b is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(b, NewVarInt(0)))
+				is.True(variant.DeepEqual(b, variant.Int(0)))
 			},
 		},
 		{
@@ -1125,7 +1126,7 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantString)
+				s, ok := v.(*variant.String)
 				if !ok {
 					is.Fail("var a is not string", name)
 					return
@@ -1153,7 +1154,7 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantString)
+				s, ok := v.(*variant.String)
 				if !ok {
 					is.Fail("var a is not string", name)
 					return
@@ -1187,13 +1188,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				i, ok := v.(*VariantNum)
+				i, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var i is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(i, NewVarInt(10)))
+				is.True(variant.DeepEqual(i, variant.Int(10)))
 			},
 		},
 		{
@@ -1219,13 +1220,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				i, ok := v.(*VariantNum)
+				i, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var i is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(i, NewVarInt(10)))
+				is.True(variant.DeepEqual(i, variant.Int(10)))
 			},
 		},
 		{
@@ -1255,13 +1256,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(5)))
+				is.True(variant.DeepEqual(s, variant.Int(5)))
 			},
 		},
 		{
@@ -1289,13 +1290,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				j, ok := v.(*VariantNum)
+				j, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var j is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(j, NewVarInt(20)))
+				is.True(variant.DeepEqual(j, variant.Int(20)))
 			},
 		},
 		{
@@ -1319,13 +1320,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+				is.True(variant.DeepEqual(s, variant.Int(6)), name)
 			},
 		},
 		{
@@ -1349,13 +1350,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+				is.True(variant.DeepEqual(s, variant.Int(6)), name)
 			},
 		},
 		{
@@ -1380,13 +1381,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+				is.True(variant.DeepEqual(s, variant.Int(6)), name)
 			},
 		},
 		{
@@ -1415,13 +1416,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+				is.True(variant.DeepEqual(s, variant.Int(6)), name)
 			},
 		},
 		{
@@ -1450,13 +1451,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(6)), name)
+				is.True(variant.DeepEqual(s, variant.Int(6)), name)
 			},
 		},
 		{
@@ -1483,13 +1484,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(4)), name)
+				is.True(variant.DeepEqual(s, variant.Int(4)), name)
 			},
 		},
 		{
@@ -1516,13 +1517,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(1)), name)
+				is.True(variant.DeepEqual(s, variant.Int(1)), name)
 			},
 		},
 		{
@@ -1553,13 +1554,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(12)), name)
+				is.True(variant.DeepEqual(s, variant.Int(12)), name)
 			},
 		},
 		{
@@ -1590,13 +1591,13 @@ func TestStmtCode(t *testing.T) {
 					return
 				}
 
-				s, ok := v.(*VariantNum)
+				s, ok := v.(*variant.Num)
 				if !ok {
 					is.Fail("var s is not num", name)
 					return
 				}
 
-				is.True(VariantsIsDeepEqual(s, NewVarInt(12)), name)
+				is.True(variant.DeepEqual(s, variant.Int(12)), name)
 			},
 		},
 	}

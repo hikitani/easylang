@@ -1,4 +1,4 @@
-package easylang
+package variant
 
 import (
 	"errors"
@@ -7,18 +7,18 @@ import (
 )
 
 var (
-	_ io.Reader = &ReaderWithType{}
-	_ io.Reader = MemReaderBool{}
-	_ io.Reader = MemReaderFunc{}
+	_ io.Reader = &readerWithType{}
+	_ io.Reader = memReaderBool{}
+	_ io.Reader = memReaderFunc{}
 )
 
-type ReaderWithType struct {
+type readerWithType struct {
 	readed bool
-	Type   VarType
+	Type   Type
 	Parent io.Reader
 }
 
-func (r *ReaderWithType) Read(p []byte) (n int, err error) {
+func (r *readerWithType) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return
 	}
@@ -38,12 +38,12 @@ func (r *ReaderWithType) Read(p []byte) (n int, err error) {
 	return n + nn, err
 }
 
-type MemReaderBool struct {
+type memReaderBool struct {
 	v bool
 }
 
 // Read implements io.Reader.
-func (m MemReaderBool) Read(p []byte) (n int, err error) {
+func (m memReaderBool) Read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return
 	}
@@ -56,8 +56,8 @@ func boolread(dst *byte, src *bool) {
 	*dst = *(*byte)(unsafe.Pointer(src))
 }
 
-type MemReaderFunc struct{}
+type memReaderFunc struct{}
 
-func (m MemReaderFunc) Read(p []byte) (n int, err error) {
+func (m memReaderFunc) Read(p []byte) (n int, err error) {
 	return 0, errors.New("function has no memory")
 }

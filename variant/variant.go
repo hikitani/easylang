@@ -1,4 +1,4 @@
-package easylang
+package variant
 
 import (
 	"bytes"
@@ -10,18 +10,18 @@ import (
 	"strings"
 )
 
-type VarType uint8
+type Type uint8
 
 var typNames = [TypeEnd]string{
 	"null", "bool", "number", "string", "array", "object", "func",
 }
 
-func (typ VarType) String() string {
+func (typ Type) String() string {
 	return typNames[typ]
 }
 
 const (
-	TypeNone VarType = iota
+	TypeNone Type = iota
 	TypeBool
 	TypeNum
 	TypeString
@@ -33,24 +33,22 @@ const (
 )
 
 var (
-	_ Variant = &VariantNone{}
-	_ Variant = &VariantBool{}
-	_ Variant = &VariantNum{}
-	_ Variant = &VariantString{}
-	_ Variant = &VariantArray{}
-	_ Variant = &VariantObject{}
-	_ Variant = &VariantFunc{}
+	_ Iface = &None{}
+	_ Iface = &Bool{}
+	_ Iface = &Num{}
+	_ Iface = &String{}
+	_ Iface = &Array{}
+	_ Iface = &Object{}
+	_ Iface = &Func{}
 )
 
-type VarID uint64
-
-type Variant interface {
-	Type() VarType
+type Iface interface {
+	Type() Type
 	MemReader() io.Reader
 	String() string
 }
 
-func MustVariantCast[T Variant](v Variant) T {
+func MustCast[T Iface](v Iface) T {
 	r, ok := v.(T)
 	if !ok {
 		panic("fatal on cast: expected " + v.Type().String() + " variant")
@@ -59,52 +57,40 @@ func MustVariantCast[T Variant](v Variant) T {
 	return r
 }
 
-type Ref struct {
-	cnt uint64
-	val Variant
+type None struct{}
+
+func (v *None) MemReader() io.Reader {
+	return &readerWithType{Type: TypeNone}
 }
 
-func (r *Ref) IncRef() {
-	// r
-}
-
-func NewRef(v Variant) *Ref {
-	return &Ref{
-		cnt: 0,
-		val: v,
-	}
-}
-
-type VariantNone struct{}
-
-func (v *VariantNone) MemReader() io.Reader {
-	return &ReaderWithType{Type: TypeNone}
-}
-
-func (v *VariantNone) Type() VarType {
+func (v *None) Type() Type {
 	return TypeNone
 }
 
-func (v *VariantNone) String() string {
+func (v *None) String() string {
 	return "none"
 }
 
-type VariantBool struct {
+type Bool struct {
 	v bool
 }
 
-func (v *VariantBool) MemReader() io.Reader {
-	return &ReaderWithType{
+func (v *Bool) Bool() bool {
+	return v.v
+}
+
+func (v *Bool) MemReader() io.Reader {
+	return &readerWithType{
 		Type:   TypeBool,
-		Parent: MemReaderBool{v: v.v},
+		Parent: memReaderBool{v: v.v},
 	}
 }
 
-func (v *VariantBool) Type() VarType {
+func (v *Bool) Type() Type {
 	return TypeBool
 }
 
-func (v *VariantBool) String() string {
+func (v *Bool) String() string {
 	if v.v {
 		return "true"
 	}
@@ -112,44 +98,52 @@ func (v *VariantBool) String() string {
 	return "false"
 }
 
-type VariantNum struct {
+type Num struct {
 	v *big.Float
 }
 
-func (v *VariantNum) IsZero() bool {
+func (v *Num) Value() *big.Float {
+	return v.v
+}
+
+func (v *Num) Neg() *Num {
+	return NewNum(new(big.Float).Neg(v.v))
+}
+
+func (v *Num) IsZero() bool {
 	n, acc := v.v.Int64()
 	return n == 0 && acc == big.Exact
 }
 
-func (v *VariantNum) IsInf() bool {
+func (v *Num) IsInf() bool {
 	return v.v.IsInf()
 }
 
-func (v *VariantNum) Sign() int {
+func (v *Num) Sign() int {
 	return v.v.Sign()
 }
 
-func (v *VariantNum) LessThan(than *VariantNum) bool {
+func (v *Num) LessThan(than *Num) bool {
 	return v.v.Cmp(than.v) == -1
 }
 
-func (v *VariantNum) LessOrEqualTo(to *VariantNum) bool {
+func (v *Num) LessOrEqualTo(to *Num) bool {
 	return v.v.Cmp(to.v) <= 0
 }
 
-func (v *VariantNum) GreaterThan(than *VariantNum) bool {
+func (v *Num) GreaterThan(than *Num) bool {
 	return v.v.Cmp(than.v) == 1
 }
 
-func (v *VariantNum) GreaterOrEqualTo(to *VariantNum) bool {
+func (v *Num) GreaterOrEqualTo(to *Num) bool {
 	return v.v.Cmp(to.v) >= 0
 }
 
-func (v *VariantNum) EqualTo(to *VariantNum) bool {
+func (v *Num) EqualTo(to *Num) bool {
 	return v.v.Cmp(to.v) == 0
 }
 
-func (v *VariantNum) AsUInt64() (uint64, error) {
+func (v *Num) AsUInt64() (uint64, error) {
 	if !v.v.IsInt() {
 		return 0, errors.New("number is not integer")
 	}
@@ -166,7 +160,7 @@ func (v *VariantNum) AsUInt64() (uint64, error) {
 	return num, nil
 }
 
-func (v *VariantNum) AsInt64() (int64, error) {
+func (v *Num) AsInt64() (int64, error) {
 	if !v.v.IsInt() {
 		return 0, errors.New("number is not integer")
 	}
@@ -183,52 +177,56 @@ func (v *VariantNum) AsInt64() (int64, error) {
 	return num, nil
 }
 
-func (v *VariantNum) MemReader() io.Reader {
+func (v *Num) MemReader() io.Reader {
 	prec := v.v.Prec()
 	cap := 10 + prec
 	repr := v.v.Append(make([]byte, 0, cap), 'g', int(prec))
-	return &ReaderWithType{
+	return &readerWithType{
 		Type:   TypeNum,
 		Parent: bytes.NewBuffer(repr),
 	}
 }
 
-func (v *VariantNum) Type() VarType {
+func (v *Num) Type() Type {
 	return TypeNum
 }
 
-func (v *VariantNum) String() string {
+func (v *Num) String() string {
 	return v.v.String()
 }
 
-type VariantString struct {
+type String struct {
 	v string
 }
 
-func (v *VariantString) String() string {
+func (v *String) String() string {
 	return v.v
 }
 
-func (v *VariantString) MemReader() io.Reader {
-	return &ReaderWithType{
+func (v *String) MemReader() io.Reader {
+	return &readerWithType{
 		Type:   TypeString,
 		Parent: strings.NewReader(v.v),
 	}
 }
 
-func (v *VariantString) Type() VarType {
+func (v *String) Type() Type {
 	return TypeString
 }
 
-type VariantArray struct {
-	v []Variant
+type Array struct {
+	v []Iface
 }
 
-func (v *VariantArray) Len() int {
+func (v *Array) Len() int {
 	return len(v.v)
 }
 
-func (v *VariantArray) Get(idx int64) (Variant, error) {
+func (v *Array) Slice() []Iface {
+	return v.v
+}
+
+func (v *Array) Get(idx int64) (Iface, error) {
 	norm := idx
 	if idx < 0 {
 		norm = int64(len(v.v)) + idx
@@ -241,8 +239,12 @@ func (v *VariantArray) Get(idx int64) (Variant, error) {
 	return v.v[norm], nil
 }
 
-func (v VariantArray) MemReader() io.Reader {
-	r := ReaderWithType{
+func (v *Array) Append(el ...Iface) {
+	v.v = append(v.v, el...)
+}
+
+func (v Array) MemReader() io.Reader {
+	r := readerWithType{
 		Type: TypeArray,
 	}
 
@@ -259,11 +261,11 @@ func (v VariantArray) MemReader() io.Reader {
 	return &r
 }
 
-func (v *VariantArray) Type() VarType {
+func (v *Array) Type() Type {
 	return TypeArray
 }
 
-func (v *VariantArray) String() string {
+func (v *Array) String() string {
 	var sb strings.Builder
 	sb.WriteByte('[')
 
@@ -278,12 +280,12 @@ func (v *VariantArray) String() string {
 	return sb.String()
 }
 
-type VariantObject struct {
-	v    map[string]Variant
-	keys map[string]Variant
+type Object struct {
+	v    map[string]Iface
+	keys map[string]Iface
 }
 
-func (v *VariantObject) Get(key Variant) (val Variant, err error) {
+func (v *Object) Get(key Iface) (val Iface, err error) {
 	kb, err := io.ReadAll(key.MemReader())
 	if err != nil {
 		return nil, fmt.Errorf("%s is not hashable", key.Type())
@@ -298,7 +300,7 @@ func (v *VariantObject) Get(key Variant) (val Variant, err error) {
 	return val, nil
 }
 
-func (obj *VariantObject) Set(k, v Variant) error {
+func (obj *Object) Set(k, v Iface) error {
 	kb, err := io.ReadAll(k.MemReader())
 	if err != nil {
 		return fmt.Errorf("%s is not hashable", k.Type())
@@ -309,12 +311,25 @@ func (obj *VariantObject) Set(k, v Variant) error {
 	return nil
 }
 
-func (v *VariantObject) Len() int {
+func (v *Object) IterFunc(it func(k, v Iface) (cont, brk bool)) {
+	for k, val := range v.v {
+		cont, brk := it(v.keys[k], val)
+		if cont {
+			continue
+		}
+
+		if brk {
+			break
+		}
+	}
+}
+
+func (v *Object) Len() int {
 	return len(v.v)
 }
 
-func (v *VariantObject) MemReader() io.Reader {
-	r := ReaderWithType{
+func (v *Object) MemReader() io.Reader {
+	r := readerWithType{
 		Type: TypeObject,
 	}
 
@@ -332,11 +347,11 @@ func (v *VariantObject) MemReader() io.Reader {
 	return &r
 }
 
-func (v *VariantObject) Type() VarType {
+func (v *Object) Type() Type {
 	return TypeObject
 }
 
-func (v *VariantObject) String() string {
+func (v *Object) String() string {
 	var sb strings.Builder
 	sb.WriteByte('{')
 
@@ -356,65 +371,65 @@ func (v *VariantObject) String() string {
 	return sb.String()
 }
 
-type VariantFunc struct {
-	v func(args []Variant) (Variant, error)
+type Func struct {
+	v func(args []Iface) (Iface, error)
 }
 
-func (v *VariantFunc) Call(args []Variant) (Variant, error) {
+func (v *Func) Call(args []Iface) (Iface, error) {
 	return v.v(args)
 }
 
-func (v *VariantFunc) MemReader() io.Reader {
-	return MemReaderFunc{}
+func (v *Func) MemReader() io.Reader {
+	return memReaderFunc{}
 }
 
-func (v *VariantFunc) Type() VarType {
+func (v *Func) Type() Type {
 	return TypeFunc
 }
 
-func (v *VariantFunc) String() string {
+func (v *Func) String() string {
 	return "function"
 }
 
-func VariantsIsDeepEqual(lval, rval Variant) bool {
-	if lval == nil {
-		return rval == nil
-	} else if rval == nil {
+func DeepEqual(x, y Iface) bool {
+	if x == nil {
+		return y == nil
+	} else if y == nil {
 		return false
 	}
 
-	if lval.Type() != rval.Type() {
+	if x.Type() != y.Type() {
 		return false
 	}
 
-	switch lval.Type() {
+	switch x.Type() {
 	case TypeNone:
 		return true
 	case TypeBool:
-		lb, rb := MustVariantCast[*VariantBool](lval), MustVariantCast[*VariantBool](rval)
+		lb, rb := MustCast[*Bool](x), MustCast[*Bool](y)
 		return lb.v == rb.v
 	case TypeNum:
-		lnum, rnum := MustVariantCast[*VariantNum](lval), MustVariantCast[*VariantNum](rval)
+		lnum, rnum := MustCast[*Num](x), MustCast[*Num](y)
 		return lnum.v.Cmp(rnum.v) == 0
 	case TypeString:
-		ls, rs := MustVariantCast[*VariantString](lval), MustVariantCast[*VariantString](rval)
+		ls, rs := MustCast[*String](x), MustCast[*String](y)
 		return ls.v == rs.v
 	case TypeArray:
-		larr, rarr := MustVariantCast[*VariantArray](lval), MustVariantCast[*VariantArray](rval)
+		larr, rarr := MustCast[*Array](x), MustCast[*Array](y)
 		if len(larr.v) != len(rarr.v) {
 			return false
 		}
 
 		for i := 0; i < len(larr.v); i++ {
 			lv, rv := larr.v[i], rarr.v[i]
-			if !VariantsIsDeepEqual(lv, rv) {
+			if !DeepEqual(lv, rv) {
 				return false
 			}
 		}
 
 		return true
 	case TypeObject:
-		lobj, robj := MustVariantCast[*VariantObject](lval), MustVariantCast[*VariantObject](rval)
+		lobj, robj := MustCast[*Object](x), MustCast[*Object](y)
 		if lobj.v == nil && robj.v == nil {
 			return true
 		}
@@ -438,7 +453,7 @@ func VariantsIsDeepEqual(lval, rval Variant) bool {
 				return false
 			}
 
-			if !VariantsIsDeepEqual(lv, rv) {
+			if !DeepEqual(lv, rv) {
 				return false
 			}
 		}
@@ -447,35 +462,35 @@ func VariantsIsDeepEqual(lval, rval Variant) bool {
 	case TypeFunc:
 		return false
 	}
-	panic("is equal: unknown type " + lval.Type().String())
+	panic("is equal: unknown type " + x.Type().String())
 }
 
-func NewVarNone() *VariantNone {
-	return &VariantNone{}
+func NewNone() *None {
+	return &None{}
 }
 
-func NewVarBool(v bool) *VariantBool {
-	return &VariantBool{v: v}
+func NewBool(v bool) *Bool {
+	return &Bool{v: v}
 }
 
-func NewVarNum(v *big.Float) *VariantNum {
-	return &VariantNum{v: v}
+func NewNum(v *big.Float) *Num {
+	return &Num{v: v}
 }
 
-func NewVarString(v string) *VariantString {
-	return &VariantString{v: v}
+func NewString(v string) *String {
+	return &String{v: v}
 }
 
-func NewVarArray(v []Variant) *VariantArray {
-	return &VariantArray{v: v}
+func NewArray(v []Iface) *Array {
+	return &Array{v: v}
 }
 
-func NewVarObject(keys []Variant, values []Variant) (*VariantObject, error) {
+func NewObject(keys []Iface, values []Iface) (*Object, error) {
 	if len(keys) != len(values) {
 		return nil, errors.New("the number of keys does not match the number of values")
 	}
-	m := make(map[string]Variant, len(keys))
-	ks := make(map[string]Variant, len(keys))
+	m := make(map[string]Iface, len(keys))
+	ks := make(map[string]Iface, len(keys))
 	for i := 0; i < len(keys); i++ {
 		k, v := keys[i], values[i]
 		kb, err := io.ReadAll(k.MemReader())
@@ -487,40 +502,48 @@ func NewVarObject(keys []Variant, values []Variant) (*VariantObject, error) {
 		ks[string(kb)] = k
 	}
 
-	return &VariantObject{v: m, keys: ks}, nil
+	return &Object{v: m, keys: ks}, nil
 }
 
-func MustNewVarObject(keys []Variant, values []Variant) *VariantObject {
-	obj, err := NewVarObject(keys, values)
+func MustNewObject(keys []Iface, values []Iface) *Object {
+	obj, err := NewObject(keys, values)
 	if err != nil {
 		panic("object constructor: " + err.Error())
 	}
 	return obj
 }
 
-func NewVarFunc(v func(args []Variant) (Variant, error)) *VariantFunc {
-	return &VariantFunc{v: v}
+func NewFunc(v func(args []Iface) (Iface, error)) *Func {
+	return &Func{v: v}
 }
 
-func NewVarInt[T ~int](v T) *VariantNum {
+func Int[T ~int](v T) *Num {
 	f := new(big.Float).SetInt64(int64(v))
-	return &VariantNum{v: f}
+	return &Num{v: f}
 }
 
-func NewVarFloat[T float32 | float64](v T) *VariantNum {
+func Float[T float32 | float64](v T) *Num {
 	f := new(big.Float).
 		SetPrec(64).
 		SetMode(big.ToNearestEven).
 		SetFloat64(float64(v))
-	return &VariantNum{v: f}
+	return &Num{v: f}
 }
 
-func NewVarInf() *VariantNum {
+func Inf() *Num {
 	f := new(big.Float).SetInf(false)
-	return &VariantNum{v: f}
+	return &Num{v: f}
 }
 
-func NewVarNegInf() *VariantNum {
+func NegInf() *Num {
 	f := new(big.Float).SetInf(true)
-	return &VariantNum{v: f}
+	return &Num{v: f}
+}
+
+func True() *Bool {
+	return NewBool(true)
+}
+
+func False() *Bool {
+	return NewBool(false)
 }
