@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	"github.com/alecthomas/participle/v2"
-	"github.com/alecthomas/participle/v2/lexer"
+	lex "github.com/alecthomas/participle/v2/lexer"
+	"github.com/hikitani/easylang/lexer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ type testCases[T any] []struct {
 func TestBasicLit(t *testing.T) {
 	parser, err := participle.Build[BasicLit](
 		participle.Elide("Comment", "Whitespace"),
-		participle.Lexer(lexdef),
+		participle.Lexer(lexer.Definition()),
 	)
 	require.NoError(t, err)
 
@@ -138,14 +139,14 @@ func TestBasicLit(t *testing.T) {
 			continue
 		}
 
-		isEq(t, testCase.Expected, actual)
+		isEq(t, testCase.Expected, actual, i)
 		is.NoError(err, i)
 	}
 }
 
 func TestExpr(t *testing.T) {
 	parser, err := participle.Build[Expr](
-		participle.Lexer(lexdef),
+		participle.Lexer(lexer.Definition()),
 		participle.Elide("Comment", "Whitespace"),
 	)
 	require.NoError(t, err)
@@ -347,13 +348,13 @@ func TestExpr(t *testing.T) {
 		}
 
 		is.NoError(err, i)
-		isEq(t, testCase.Expected, x)
+		isEq(t, testCase.Expected, x, i)
 	}
 }
 
 func TestStmt(t *testing.T) {
 	parser, err := participle.Build[ProgramFile](
-		participle.Lexer(lexdef),
+		participle.Lexer(lexer.Definition()),
 		participle.Elide("Comment", "Whitespace"),
 	)
 	require.NoError(t, err)
@@ -394,6 +395,28 @@ func TestStmt(t *testing.T) {
 								Name: &Ident{Name: "a"},
 							}}},
 							AugmentedOp: ptr("+"),
+							AssignX: &Expr{
+								UnaryExpr: UnaryExpr{Operand: Operand{Literal: &Literal{
+									Basic: &BasicLit{
+										Number: ptr("1"),
+									},
+								}}},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Code: `pub a = 1`,
+			Expected: ProgramFile{
+				List: &[]*Stmt{
+					{
+						Expr: &ExprStmt{
+							IsPub: ptr("pub"),
+							X: Expr{UnaryExpr: UnaryExpr{Operand: Operand{
+								Name: &Ident{Name: "a"},
+							}}},
 							AssignX: &Expr{
 								UnaryExpr: UnaryExpr{Operand: Operand{Literal: &Literal{
 									Basic: &BasicLit{
@@ -606,20 +629,20 @@ func TestStmt(t *testing.T) {
 		}
 
 		is.NoError(err, i)
-		isEq(t, testCase.Expected, x)
+		isEq(t, testCase.Expected, x, i)
 	}
 }
 
-func isEq(t *testing.T, x, y any) {
+func isEq(t *testing.T, x, y any, caseNum int) {
 	var xb, yb bytes.Buffer
-	require.NoError(t, json.NewEncoder(&xb).Encode(x))
-	require.NoError(t, json.NewEncoder(&yb).Encode(y))
+	require.NoError(t, json.NewEncoder(&xb).Encode(x), caseNum)
+	require.NoError(t, json.NewEncoder(&yb).Encode(y), caseNum)
 	var xm, ym map[string]any
-	require.NoError(t, json.NewDecoder(&xb).Decode(&xm))
-	require.NoError(t, json.NewDecoder(&yb).Decode(&ym))
+	require.NoError(t, json.NewDecoder(&xb).Decode(&xm), caseNum)
+	require.NoError(t, json.NewDecoder(&yb).Decode(&ym), caseNum)
 	delNodeFields(xm)
 	delNodeFields(ym)
-	assert.Equal(t, xm, ym)
+	assert.Equal(t, xm, ym, caseNum)
 }
 
 func delNodeFields(m map[string]any) {
@@ -656,6 +679,6 @@ func delNodeFields(m map[string]any) {
 
 func newNode() Node {
 	return Node{
-		Pos: lexer.Position{},
+		Pos: lex.Position{},
 	}
 }

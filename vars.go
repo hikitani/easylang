@@ -1,6 +1,10 @@
 package easylang
 
-import "github.com/hikitani/easylang/variant"
+import (
+	"fmt"
+
+	"github.com/hikitani/easylang/variant"
+)
 
 type Register uint32
 
@@ -9,8 +13,14 @@ const (
 )
 
 type varmapper struct {
-	m map[string]Register
-	i Register
+	m    map[string]Register
+	pubs map[string]struct{}
+	i    Register
+}
+
+func (v *varmapper) RegisterPub(name string) Register {
+	v.pubs[name] = struct{}{}
+	return v.Register(name)
 }
 
 func (v *varmapper) Register(name string) Register {
@@ -31,7 +41,11 @@ type VarScope struct {
 
 func NewVarScope() *VarScope {
 	return &VarScope{
-		r: varmapper{m: map[string]Register{}, i: 1}, // i = 0 reserved for return value
+		r: varmapper{
+			i:    1, // i = 0 reserved for return value
+			m:    map[string]Register{},
+			pubs: map[string]struct{}{},
+		},
 		m: map[Register]variant.Iface{},
 	}
 }
@@ -61,6 +75,10 @@ func (scope *VarScope) Register(name string) Register {
 	return scope.r.Register(name)
 }
 
+func (scope *VarScope) RegisterPub(name string) Register {
+	return scope.r.RegisterPub(name)
+}
+
 func (scope *VarScope) GetVar(r Register) (variant.Iface, bool) {
 	v, ok := scope.m[r]
 	return v, ok
@@ -78,6 +96,11 @@ func (scope *VarScope) VarByName(name string) variant.Iface {
 func (scope *VarScope) LookupRegister(name string) (Register, bool) {
 	r, ok := scope.r.m[name]
 	return r, ok
+}
+
+func (scope *VarScope) IsPublic(name string) bool {
+	_, ok := scope.r.pubs[name]
+	return ok
 }
 
 func (scope *VarScope) DefineVar(r Register, value variant.Iface) {
@@ -161,23 +184,6 @@ func (vars *Vars) LastScope() *VarScope {
 	return vars.Locals[len(vars.Locals)-1]
 }
 
-func (vars *Vars) GetScope(level int) *VarScope {
-	return vars.Locals[level]
-}
-
-func (vars *Vars) DefineGlobalVariable(r Register, value variant.Iface) {
-	vars.Global.DefineVar(r, value)
-}
-
-func (vars *Vars) DefineVariable(r Register, value variant.Iface) {
-	if len(vars.Locals) == 0 {
-		vars.Global.DefineVar(r, value)
-		return
-	}
-
-	vars.LastScope().DefineVar(r, value)
-}
-
 func (vars *Vars) Register(name string) (*VarScope, Register) {
 	if len(vars.Locals) == 0 {
 		return vars.Global, vars.Global.r.Register(name)
@@ -197,6 +203,26 @@ func (vars *Vars) Register(name string) (*VarScope, Register) {
 	return vars.LastScope(), vars.LastScope().Register(name)
 }
 
+func (vars *Vars) RegisterPub(name string) (*VarScope, Register, error) {
+	_, ok := vars.Global.LookupRegister(name)
+	if !ok {
+		r := vars.Global.RegisterPub(name)
+		return vars.Global, r, nil
+	}
+
+	return nil, 0, fmt.Errorf("var '%s' already defined as pub", name)
+}
+
+func (vars *Vars) Published() *variant.Object {
+	var keys, vals []variant.Iface
+	for pubname := range vars.Global.r.pubs {
+		keys = append(keys, variant.NewString(pubname))
+		vals = append(vals, vars.Global.VarByName(pubname))
+	}
+
+	return variant.MustNewObject(keys, vals)
+}
+
 func (vars *Vars) LookupRegister(name string) (Register, bool) {
 	for _, scope := range vars.Locals {
 		r, ok := scope.LookupRegister(name)
@@ -206,15 +232,6 @@ func (vars *Vars) LookupRegister(name string) (Register, bool) {
 	}
 
 	return vars.Global.LookupRegister(name)
-}
-
-func (vars *Vars) SetOrDefineVariable(name Register, value variant.Iface) {
-	if setter, ok := vars.setter(name); ok {
-		setter(value)
-		return
-	}
-
-	vars.DefineVariable(name, value)
 }
 
 func NewVars() *Vars {

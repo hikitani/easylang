@@ -5,11 +5,12 @@ import (
 	"io"
 
 	"github.com/alecthomas/participle/v2"
+	"github.com/hikitani/easylang/lexer"
 )
 
 var parser = participle.MustBuild[ProgramFile](
-	participle.Lexer(lexdef),
-	participle.Elide("Comment", "Whitespace"),
+	participle.Lexer(lexer.Definition()),
+	participle.Elide(lexer.IgnoreTokens()...),
 )
 
 type Machine struct {

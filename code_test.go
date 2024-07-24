@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/participle/v2"
+	"github.com/hikitani/easylang/lexer"
 	"github.com/hikitani/easylang/variant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +21,7 @@ func mustFloat(v string) *big.Float {
 
 func TestExprCode(t *testing.T) {
 	parser, err := participle.Build[Expr](
-		participle.Lexer(lexdef),
+		participle.Lexer(lexer.Definition()),
 		participle.Elide("Comment", "Whitespace"),
 	)
 	require.NoError(t, err)
@@ -153,7 +154,8 @@ func TestExprCode(t *testing.T) {
 				[]variant.Iface{
 					variant.NewString("hello"),
 					variant.Int(111),
-					variant.NewArray([]variant.Iface{variant.Int(1), variant.Int(2), variant.Int(3)})},
+					variant.NewArray([]variant.Iface{variant.Int(1), variant.Int(2), variant.Int(3)}),
+				},
 				[]variant.Iface{
 					variant.NewString("world"),
 					variant.NewArray(nil),
@@ -905,7 +907,7 @@ func TestExprCode(t *testing.T) {
 
 func TestStmtCode(t *testing.T) {
 	parser, err := participle.Build[ProgramFile](
-		participle.Lexer(lexdef),
+		participle.Lexer(lexer.Definition()),
 		participle.Elide("Comment", "Whitespace"),
 	)
 	require.NoError(t, err)
@@ -984,6 +986,79 @@ func TestStmtCode(t *testing.T) {
 				foo += " world"
 			`,
 			IsRuntimeError: true,
+		},
+		{
+			Name: "Stmt_Assign_Pub",
+			Input: `
+				pub foo = 1
+				pub bar = "hello world"
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				pub := vars.Published()
+				foo, err := pub.Get(variant.NewString("foo"))
+				if err != nil {
+					is.Fail("pub foo not found", name)
+					return
+				}
+
+				bar, err := pub.Get(variant.NewString("bar"))
+				if err != nil {
+					is.Fail("pub bar not found", name)
+					return
+				}
+
+				is.True(variant.DeepEqual(foo, variant.Int(1)))
+				is.True(variant.DeepEqual(bar, variant.NewString("hello world")))
+			},
+		},
+		{
+			Name: "Stmt_Assign_Pub_WithModifying",
+			Input: `
+				pub foo = 1
+				pub bar = "hello"
+				bar += " world"
+			`,
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				pub := vars.Published()
+				foo, err := pub.Get(variant.NewString("foo"))
+				if err != nil {
+					is.Fail("pub foo not found", name)
+					return
+				}
+
+				bar, err := pub.Get(variant.NewString("bar"))
+				if err != nil {
+					is.Fail("pub bar not found", name)
+					return
+				}
+
+				is.True(variant.DeepEqual(foo, variant.Int(1)))
+				is.True(variant.DeepEqual(bar, variant.NewString("hello world")))
+			},
+		},
+		{
+			Name: "Stmt_Assign_Pub_Existed",
+			Input: `
+				foo = 1
+				pub foo = 2
+			`,
+			IsCompileError: true,
+		},
+		{
+			Name: "Stmt_Assign_Pub_Augmented",
+			Input: `
+				pub foo += 2
+			`,
+			IsCompileError: true,
+		},
+		{
+			Name: "Stmt_Assign_Pub_LocalScope",
+			Input: `
+				block {
+					pub foo = 1
+				}
+			`,
+			IsCompileError: true,
 		},
 		{
 			Name: "Stmt_If_Simple",
@@ -1638,7 +1713,7 @@ func TestStmtCode(t *testing.T) {
 
 func BenchmarkProgram(b *testing.B) {
 	parser, err := participle.Build[ProgramFile](
-		participle.Lexer(lexdef),
+		participle.Lexer(lexer.Definition()),
 		participle.Elide("Comment", "Whitespace"),
 	)
 	require.NoError(b, err)

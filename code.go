@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hikitani/easylang/lexer"
 	"github.com/hikitani/easylang/variant"
 )
 
@@ -289,21 +290,21 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 	case node.Name != nil:
 		name := node.Name.Name
 
-		if IsConstValue(name) {
+		if lexer.IsConstValue(name) {
 			switch name {
-			case ConstValueNone:
+			case lexer.ConstValueNone:
 				return evaler(func() (variant.Iface, error) {
 					return variant.NewNone(), nil
 				}), nil
-			case ConstValueTrue:
+			case lexer.ConstValueTrue:
 				return evaler(func() (variant.Iface, error) {
 					return variant.NewBool(true), nil
 				}), nil
-			case ConstValueFalse:
+			case lexer.ConstValueFalse:
 				return evaler(func() (variant.Iface, error) {
 					return variant.NewBool(false), nil
 				}), nil
-			case ConstValueInf:
+			case lexer.ConstValueInf:
 				return evaler(func() (variant.Iface, error) {
 					return variant.NewNum(new(big.Float).SetInf(false)), nil
 				}), nil
@@ -312,7 +313,7 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 			return nil, fmt.Errorf("unknown const value %s", name)
 		}
 
-		if IsKeyword(name) {
+		if lexer.IsKeyword(name) {
 			return nil, fmt.Errorf("bad variable: name %s is keyword", name)
 		}
 
@@ -761,7 +762,7 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 	for i := 0; binExpr != nil; i++ {
 		ops = append(ops, opinfo{
 			op:      binExpr.Op,
-			prior:   operatorPriorities[binExpr.Op],
+			prior:   lexer.MustOperatorPriority(binExpr.Op),
 			origPos: i,
 		})
 
@@ -851,7 +852,7 @@ func evalBinary(op string, lval, rval variant.Iface) (variant.Iface, error) {
 		return arr, nil
 	}
 
-	if IsCmpOp(op) {
+	if lexer.IsCmpOp(op) {
 		if rval.Type() != lval.Type() {
 			return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
 		}
@@ -888,7 +889,7 @@ func evalBinary(op string, lval, rval variant.Iface) (variant.Iface, error) {
 		return variant.NewBool(b), nil
 	}
 
-	if IsArithOp(op) {
+	if lexer.IsArithOp(op) {
 		if rval.Type() != variant.TypeNum || lval.Type() != variant.TypeNum {
 			return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
 		}
@@ -960,7 +961,7 @@ func evalBinary(op string, lval, rval variant.Iface) (variant.Iface, error) {
 		return variant.NewNum(num), nil
 	}
 
-	if IsPredicateOp(op) {
+	if lexer.IsPredicateOp(op) {
 		if rval.Type() != variant.TypeBool || lval.Type() != variant.TypeBool {
 			return nil, fmt.Errorf("unsupported operand type for %s: %s and %s", op, lval.Type(), rval.Type())
 		}
@@ -1031,7 +1032,8 @@ func (c *ReturnStmtCodeGen) CodeGen(node *ReturnStmt) (StmtInvoker, error) {
 }
 
 type ExprStmtCodeGen struct {
-	exprGen *ExprCodeGen
+	isGlobalScope bool
+	exprGen       *ExprCodeGen
 }
 
 func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
@@ -1070,13 +1072,32 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("invalid rhs operand: %w", err)
 	}
 
-	if _, ok := c.exprGen.vars.LookupRegister(name); !ok {
-		if node.AugmentedOp != nil {
-			return nil, fmt.Errorf("name '%s' is not defined", name)
+	var (
+		scope *VarScope
+		reg   Register
+	)
+	if node.IsPub != nil {
+		if !c.isGlobalScope {
+			return nil, errors.New("cannot publish variable in non-global scope")
 		}
-	}
 
-	scope, reg := c.exprGen.vars.Register(name)
+		if node.AugmentedOp != nil {
+			return nil, errors.New("cannot use augmented operator with pub keyword")
+		}
+
+		scope, reg, err = c.exprGen.vars.RegisterPub(name)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if _, ok := c.exprGen.vars.LookupRegister(name); !ok {
+			if node.AugmentedOp != nil {
+				return nil, fmt.Errorf("name '%s' is not defined", name)
+			}
+		}
+
+		scope, reg = c.exprGen.vars.Register(name)
+	}
 
 	return invoker(func() error {
 		v, err := reval.Eval()
@@ -1144,7 +1165,8 @@ func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 		invoker, err = (&BreakStmtCodeGen{}).CodeGen(node.Break)
 	case node.Expr != nil:
 		invoker, err = (&ExprStmtCodeGen{
-			exprGen: &ExprCodeGen{vars: c.vars},
+			isGlobalScope: c.isGlobalScope,
+			exprGen:       &ExprCodeGen{vars: c.vars},
 		}).CodeGen(node.Expr)
 	default:
 		return nil, fmt.Errorf("statement not defined (expected if, for, while, assignment, return or expr statement)")

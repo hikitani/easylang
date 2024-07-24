@@ -1,7 +1,8 @@
-package easylang
+package lexer
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/alecthomas/participle/v2/lexer"
@@ -54,6 +55,42 @@ var operatorPriorities = map[string]int{
 	"and": 2, "or": 1,
 }
 
+func MustOperatorPriority(op string) int {
+	if priority, ok := OperatorPriority(op); ok {
+		return priority
+	}
+
+	panic("got invalid operator: " + op)
+}
+
+func OperatorPriority(op string) (int, bool) {
+	if priority, ok := operatorPriorities[op]; ok {
+		return priority, true
+	}
+
+	return 0, false
+}
+
+type Lexer interface {
+	lexer.Lexer
+}
+
+func Lex(filename string, r io.Reader) (Lexer, error) {
+	return lexdef.Lex(filename, r)
+}
+
+func LexString(filename string, s string) (Lexer, error) {
+	return lexdef.LexString(filename, s)
+}
+
+func Definition() lexer.Definition {
+	return lexdef
+}
+
+func IgnoreTokens() []string {
+	return []string{"Whitespace", "Comment"}
+}
+
 func IsConstValue(s string) bool {
 	switch s {
 	case ConstValueNone, ConstValueTrue, ConstValueFalse, ConstValueInf:
@@ -90,19 +127,10 @@ func IsPredicateOp(op string) bool {
 	return false
 }
 
-func IsLiteralConstant(s string) bool {
-	switch s {
-	case "true", "false", "none":
-		return true
-	}
-
-	return false
-}
-
 func IsKeyword(s string) bool {
 	switch s {
 	case "if", "else", "for", "in", "while",
-		"return", "break", "continue", "block":
+		"return", "break", "continue", "block", "pub":
 		return true
 	}
 

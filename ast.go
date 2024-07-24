@@ -149,6 +149,7 @@ type Stmt struct {
 
 type ExprStmt struct {
 	Node
+	IsPub       *string `@"pub"?`
 	X           Expr    `@@`
 	AugmentedOp *string `( @OpBinaryArith? `
 	AssignX     *Expr   `  "=" @@ )?`
