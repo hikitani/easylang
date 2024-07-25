@@ -8,6 +8,8 @@ import (
 	"math"
 	"math/big"
 	"strings"
+
+	"github.com/ALTree/bigfloat"
 )
 
 type Type uint8
@@ -106,6 +108,18 @@ func (v *Num) Value() *big.Float {
 	return v.v
 }
 
+func (v *Num) Copy() *Num {
+	return NewNum(new(big.Float).Set(v.v))
+}
+
+func (v *Num) Pow(exp *Num) *Num {
+	return NewNum(bigfloat.Pow(v.v, exp.v))
+}
+
+func (v *Num) Add(other *Num) {
+	v.v.Add(v.v, other.v)
+}
+
 func (v *Num) Neg() *Num {
 	return NewNum(new(big.Float).Neg(v.v))
 }
@@ -141,6 +155,10 @@ func (v *Num) GreaterOrEqualTo(to *Num) bool {
 
 func (v *Num) EqualTo(to *Num) bool {
 	return v.v.Cmp(to.v) == 0
+}
+
+func (v *Num) Abs() *Num {
+	return NewNum(new(big.Float).Abs(v.v))
 }
 
 func (v *Num) AsUInt64() (uint64, error) {
@@ -214,19 +232,83 @@ func (v *String) Type() Type {
 	return TypeString
 }
 
+func (v *String) AsBytes() *Array {
+	return Bytes([]byte(v.String()))
+}
+
 type Array struct {
-	v []Iface
+	bmode bool
+	v     []Iface
+	bs    []byte
 }
 
 func (v *Array) Len() int {
+	if v.bmode {
+		return len(v.bs)
+	}
 	return len(v.v)
 }
 
-func (v *Array) Slice() []Iface {
-	return v.v
+func (v *Array) Slice() ([]Iface, bool) {
+	return v.v, !v.bmode
+}
+
+func (v *Array) Concat(other *Array) *Array {
+	if v.bmode && other.bmode {
+		bs := make([]byte, 0, len(v.bs)+len(other.bs))
+		return Bytes(append(append(bs, v.bs...), other.bs...))
+	}
+
+	larr := v.v
+	if v.bmode {
+		larr = make([]Iface, 0, len(v.bs))
+		for _, b := range v.bs {
+			larr = append(larr, UInt(b))
+		}
+	}
+
+	rarr := other.v
+	if other.bmode {
+		rarr = make([]Iface, 0, len(other.bs))
+		for _, b := range other.bs {
+			rarr = append(rarr, UInt(b))
+		}
+	}
+
+	return NewArray(append(larr, rarr...))
+}
+
+func (v *Array) Bytes() ([]byte, bool) {
+	return v.bs, v.bmode
+}
+
+func (v *Array) GetByte(idx int64) (byte, error) {
+	if !v.bmode {
+		return 0, errors.New("use Get() instead for generic array")
+	}
+
+	norm := idx
+	if idx < 0 {
+		norm = int64(len(v.bs)) + idx
+	}
+
+	if norm >= int64(len(v.bs)) {
+		return 0, fmt.Errorf("index %d out of range", idx)
+	}
+
+	return v.bs[idx], nil
 }
 
 func (v *Array) Get(idx int64) (Iface, error) {
+	if v.bmode {
+		b, err := v.GetByte(idx)
+		if err != nil {
+			return nil, err
+		}
+
+		return UInt(b), nil
+	}
+
 	norm := idx
 	if idx < 0 {
 		norm = int64(len(v.v)) + idx
@@ -283,6 +365,16 @@ func (v *Array) String() string {
 type Object struct {
 	v    map[string]Iface
 	keys map[string]Iface
+}
+
+func (v *Object) Items() (keys []Iface, vals []Iface) {
+	keys = make([]Iface, 0, len(v.keys))
+	vals = make([]Iface, 0, len(v.v))
+	for s, k := range v.keys {
+		keys = append(keys, k)
+		vals = append(vals, v.v[s])
+	}
+	return keys, vals
 }
 
 func (v *Object) Get(key Iface) (val Iface, err error) {
@@ -371,11 +463,24 @@ func (v *Object) String() string {
 	return sb.String()
 }
 
-type Func struct {
-	v func(args []Iface) (Iface, error)
+type Args []Iface
+
+func (args *Args) Print(w io.Writer) {
+	for _, arg := range *args {
+		fmt.Fprint(w, arg.String())
+	}
 }
 
-func (v *Func) Call(args []Iface) (Iface, error) {
+type Func struct {
+	idents []string
+	v      func(args Args) (Iface, error)
+}
+
+func (v *Func) Idents() []string {
+	return v.idents
+}
+
+func (v *Func) Call(args Args) (Iface, error) {
 	return v.v(args)
 }
 
@@ -513,12 +618,17 @@ func MustNewObject(keys []Iface, values []Iface) *Object {
 	return obj
 }
 
-func NewFunc(v func(args []Iface) (Iface, error)) *Func {
-	return &Func{v: v}
+func NewFunc(argIdents []string, v func(args Args) (Iface, error)) *Func {
+	return &Func{idents: argIdents, v: v}
 }
 
 func Int[T ~int](v T) *Num {
 	f := new(big.Float).SetInt64(int64(v))
+	return &Num{v: f}
+}
+
+func UInt[T ~uint | ~byte](v T) *Num {
+	f := new(big.Float).SetUint64(uint64(v))
 	return &Num{v: f}
 }
 
@@ -546,4 +656,11 @@ func True() *Bool {
 
 func False() *Bool {
 	return NewBool(false)
+}
+
+func Bytes(bs []byte) *Array {
+	return &Array{
+		bmode: true,
+		bs:    bs,
+	}
 }

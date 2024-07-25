@@ -917,6 +917,7 @@ func TestStmtCode(t *testing.T) {
 		Input          string
 		IsCompileError bool
 		IsRuntimeError bool
+		Prepare        func(vars *Vars) error
 		ExpectedVar    func(name string, is *assert.Assertions, vars *Vars)
 	}{
 		{
@@ -1466,6 +1467,42 @@ func TestStmtCode(t *testing.T) {
 			},
 		},
 		{
+			Name: "Stmt_For_Array_Bytes",
+			Input: `
+				s = 0
+				for el in arr {
+					s += el
+				}
+			`,
+			Prepare: func(vars *Vars) error {
+				arr := []byte{1, 2, 3}
+				arrReg := vars.Global.Register("arr")
+				vars.Global.DefineVar(arrReg, variant.Bytes(arr))
+				return nil
+			},
+			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
+				r, ok := vars.Global.LookupRegister("s")
+				if !ok {
+					is.Fail("register s not found", name)
+					return
+				}
+
+				v, ok := vars.Global.GetVar(r)
+				if !ok {
+					is.Fail("var s not found", name)
+					return
+				}
+
+				s, ok := v.(*variant.Num)
+				if !ok {
+					is.Fail("var s is not num", name)
+					return
+				}
+
+				is.True(variant.DeepEqual(s, variant.Int(6)), name)
+			},
+		},
+		{
 			Name: "Stmt_For_Object_ByKey",
 			Input: `
 			s = 0
@@ -1686,6 +1723,13 @@ func TestStmtCode(t *testing.T) {
 		}
 
 		vars := NewDebugVars()
+		if testCase.Prepare != nil {
+			if err := testCase.Prepare(vars); err != nil {
+				is.Fail(err.Error(), testCase.Name)
+				continue
+			}
+		}
+
 		invoker, err := (&Program{vars: vars}).CodeGen(stmt)
 		if testCase.IsCompileError {
 			assert.Error(t, err, testCase.Name)

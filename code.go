@@ -667,6 +667,11 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		}
 	}
 
+	var argIdents []string
+	for _, arg := range args.X {
+		argIdents = append(argIdents, arg.Name)
+	}
+
 	switch {
 	case node.Expr != nil:
 		vars := c.exprGen.vars
@@ -678,7 +683,7 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (variant.Iface, error) {
-			return variant.NewFunc(func(vargs []variant.Iface) (variant.Iface, error) {
+			return variant.NewFunc(argIdents, func(vargs variant.Args) (variant.Iface, error) {
 				if err := prefn(vargs); err != nil {
 					return nil, err
 				}
@@ -696,7 +701,7 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 		}
 
 		return evaler(func() (variant.Iface, error) {
-			return variant.NewFunc(func(vargs []variant.Iface) (variant.Iface, error) {
+			return variant.NewFunc(argIdents, func(vargs variant.Args) (variant.Iface, error) {
 				if err := prefn(vargs); err != nil {
 					return nil, err
 				}
@@ -847,9 +852,7 @@ func evalBinary(op string, lval, rval variant.Iface) (variant.Iface, error) {
 
 	if op == "+" && rval.Type() == variant.TypeArray && lval.Type() == variant.TypeArray {
 		rs, ls := variant.MustCast[*variant.Array](rval), variant.MustCast[*variant.Array](lval)
-		arr := variant.NewArray(ls.Slice())
-		arr.Append(rs.Slice()...)
-		return arr, nil
+		return rs.Concat(ls), nil
 	}
 
 	if lexer.IsCmpOp(op) {
@@ -1330,21 +1333,42 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 				return nil
 			}
 
-			for i, el := range arr.Slice() {
-				iterArr(i, el)
-				err := blkInvoker.Invoke()
-				if errors.Is(err, ErrLoopBreak) {
-					break
-				}
+			if bs, ok := arr.Bytes(); ok {
+				for i, el := range bs {
+					iterArr(i, variant.UInt(el))
+					err := blkInvoker.Invoke()
+					if errors.Is(err, ErrLoopBreak) {
+						break
+					}
 
-				if errors.Is(err, ErrLoopContinue) {
-					continue
-				}
+					if errors.Is(err, ErrLoopContinue) {
+						continue
+					}
 
-				if err != nil {
-					return err
+					if err != nil {
+						return err
+					}
 				}
+			} else if s, ok := arr.Slice(); ok {
+				for i, el := range s {
+					iterArr(i, el)
+					err := blkInvoker.Invoke()
+					if errors.Is(err, ErrLoopBreak) {
+						break
+					}
+
+					if errors.Is(err, ErrLoopContinue) {
+						continue
+					}
+
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				panic("unreachable")
 			}
+
 		case variant.TypeObject:
 			obj := variant.MustCast[*variant.Object](v)
 			if obj.Len() == 0 {

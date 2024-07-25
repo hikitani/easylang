@@ -14,11 +14,18 @@ var parser = participle.MustBuild[ProgramFile](
 )
 
 type Machine struct {
-	vars   *Vars
-	parser *participle.Parser[ProgramFile]
+	vars     *Vars
+	parser   *participle.Parser[ProgramFile]
+	register *PackageRegister
 }
 
 func (m *Machine) Compile(f io.Reader) (StmtInvoker, error) {
+	builtinPkg := m.register.packages["builtin"]
+	for name, obj := range builtinPkg.Objects() {
+		r := m.vars.Global.Register(name)
+		m.vars.Global.DefineVar(r, obj)
+	}
+
 	ast, err := m.parser.Parse("", f)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -34,7 +41,8 @@ func (m *Machine) Compile(f io.Reader) (StmtInvoker, error) {
 
 func New() *Machine {
 	return &Machine{
-		vars:   NewVars(),
-		parser: parser,
+		vars:     NewVars(),
+		parser:   parser,
+		register: NewPackageRegister(),
 	}
 }
