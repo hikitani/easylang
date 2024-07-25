@@ -114,7 +114,7 @@ type FuncExpr struct {
 
 type SelectorExpr struct {
 	Node
-	Sel []SelectorExprPiece `EOL* "." EOL* @@ (EOL* "." EOL*EOL* "." EOL* @@)*`
+	Sel []SelectorExprPiece `EOL* "." EOL* @@ (EOL* "." EOL* @@)*`
 	PX  *PrimaryExpr        `@@?`
 }
 
