@@ -6,7 +6,8 @@ import (
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/hikitani/easylang/lexer"
-	"github.com/hikitani/easylang/packages"
+	"github.com/hikitani/easylang/packages/registry"
+	"github.com/hikitani/easylang/variant"
 )
 
 var parser = participle.MustBuild[ProgramFile](
@@ -17,7 +18,7 @@ var parser = participle.MustBuild[ProgramFile](
 type Machine struct {
 	vars     *Vars
 	parser   *participle.Parser[ProgramFile]
-	register *packages.Register
+	register *registry.Registry
 }
 
 func (m *Machine) Compile(f io.Reader) (StmtInvoker, error) {
@@ -30,6 +31,14 @@ func (m *Machine) Compile(f io.Reader) (StmtInvoker, error) {
 		r := m.vars.Global.Register(name)
 		m.vars.Global.DefineVar(r, obj)
 	}
+
+	iterPkg, ok := m.register.Get("iter")
+	if !ok {
+		panic("iter package not found")
+	}
+
+	iterReg := m.vars.Global.Register("iter")
+	m.vars.Global.DefineVar(iterReg, variant.FromMap(iterPkg.Objects()))
 
 	ast, err := m.parser.Parse("", f)
 	if err != nil {
@@ -48,6 +57,6 @@ func New() *Machine {
 	return &Machine{
 		vars:     NewVars(),
 		parser:   parser,
-		register: packages.NewRegister(),
+		register: registry.New(),
 	}
 }

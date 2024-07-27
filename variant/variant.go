@@ -618,6 +618,16 @@ func MustNewObject(keys []Iface, values []Iface) *Object {
 	return obj
 }
 
+func FromMap[S ~string](m map[S]Iface) *Object {
+	keys, vals := make([]Iface, 0, len(m)), make([]Iface, 0, len(m))
+	for ks, v := range m {
+		keys = append(keys, NewString(string(ks)))
+		vals = append(vals, v)
+	}
+
+	return MustNewObject(keys, vals)
+}
+
 func NewFunc(argIdents []string, v func(args Args) (Iface, error)) *Func {
 	return &Func{idents: argIdents, v: v}
 }

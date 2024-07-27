@@ -10,18 +10,21 @@ import (
 func TestFoo(t *testing.T) {
 	vm := New()
 	stmt, err := vm.Compile(strings.NewReader(`
-		res = range(10, 100, 3)
-			.where(|v| => v % 2 == 0)
-			.select(|v| => v * 2)
-			.max(10)
-			.list()
+		res = iter.
+			range(10, 100, 3).
+			where(|v| => v % 2 == 0).
+			select(|v| => v * 2).
+			max(10).
+			list()
+
+		res = iter.from(res).max(5).list()
 
 		obj = {
 			"arr": res,
 		}
-		println(obj)
+		println(obj.arr)
 	`))
 	require.NoError(t, err)
 
-	stmt.Invoke()
+	require.NoError(t, stmt.Invoke())
 }

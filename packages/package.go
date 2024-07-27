@@ -1,50 +1,10 @@
 package packages
 
 import (
-	"errors"
 	"math/big"
 
-	"github.com/hikitani/easylang/builtin"
 	"github.com/hikitani/easylang/variant"
 )
-
-var builtinPkg = NewPackage("builtin").
-	AddObjects(builtin.Objects()).
-	Build()
-
-type Register struct {
-	packages map[string]Package
-}
-
-func (reg *Register) Get(name string) (Package, bool) {
-	pkg, ok := reg.packages[name]
-	return pkg, ok
-}
-
-func (reg *Register) Register(pkg Package) error {
-	if pkg.Name() == "builtin" {
-		if pkg != builtinPkg {
-			return errors.New("package name 'builtin' is reserved")
-		}
-
-		return nil
-	}
-
-	if _, ok := reg.packages[pkg.Name()]; ok {
-		return errors.New("package name '" + pkg.Name() + "' is already registered")
-	}
-
-	reg.packages[pkg.Name()] = pkg
-	return nil
-}
-
-func NewRegister() *Register {
-	return &Register{
-		packages: map[string]Package{
-			builtinPkg.Name(): builtinPkg,
-		},
-	}
-}
 
 type Constructor struct {
 	name    string
@@ -140,18 +100,18 @@ func (p *Constructor) Objects() map[string]variant.Iface {
 	return p.objects
 }
 
-func (p *Constructor) Build() Package {
+func (p *Constructor) Build() Iface {
 	return p
 }
 
-func NewPackage(name string) *Constructor {
+func New(name string) *Constructor {
 	return &Constructor{
 		name:    name,
 		objects: map[string]variant.Iface{},
 	}
 }
 
-type Package interface {
+type Iface interface {
 	Name() string
 	Objects() map[string]variant.Iface
 }
