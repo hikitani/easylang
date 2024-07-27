@@ -21,7 +21,7 @@ var (
 
 var lexdef = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Whitespace", Pattern: `[ \t]+`},
-	{Name: "Comment", Pattern: "#[^\n]*\n?"},
+	{Name: "Comment", Pattern: `#[^\n]*\n?`},
 	{Name: "FuncSign", Pattern: "=>"},
 	{Name: "OpBinaryPrior1", Pattern: `==|!=|<=|>=`},
 	{Name: "OpBinaryPrior2", Pattern: `and|or|<|>`},
