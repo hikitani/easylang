@@ -72,7 +72,7 @@ type Expr struct {
 
 type BinaryExpr struct {
 	Node
-	Op   string      `EOL* @(OpBinaryPrior1 | OpBinaryPrior2 | OpBinaryArith) EOL*`
+	Op   string      `@(OpBinaryPrior1 | OpBinaryPrior2 | OpBinaryArith) EOL*`
 	X    UnaryExpr   `@@`
 	Next *BinaryExpr `@@?`
 }
@@ -114,7 +114,7 @@ type FuncExpr struct {
 
 type SelectorExpr struct {
 	Node
-	Sel []SelectorExprPiece `EOL* "." EOL* @@ (EOL* "." EOL* @@)*`
+	Sel []SelectorExprPiece `"." EOL* @@ ("." EOL* @@)*`
 	PX  *PrimaryExpr        `@@?`
 }
 
