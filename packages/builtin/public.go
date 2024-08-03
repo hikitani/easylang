@@ -4,7 +4,8 @@ import (
 	"github.com/hikitani/easylang/packages"
 )
 
-var Package = packages.New("builtin").
+var Package = packages.
+	New("builtin").
 	AddFunc("print", Print).
 	AddFunc("println", Println).
 	AddFunc("all", All).

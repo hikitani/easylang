@@ -22,3 +22,11 @@ func Len(args variant.Args) (variant.Iface, error) {
 		return nil, errors.New("len() argument must be string, array, or object")
 	}
 }
+
+func Str(args variant.Args) (variant.Iface, error) {
+	if len(args) != 1 {
+		return nil, errors.New("str() takes exactly one argument")
+	}
+
+	return variant.NewString(args[0].String()), nil
+}
