@@ -226,7 +226,7 @@ func TestExprCode(t *testing.T) {
 		{
 			Name:           "Var_invalid_NotDefined",
 			Input:          `foo`,
-			IsRuntimeError: true,
+			IsCompileError: true,
 		},
 		{
 			Name:           "Var_Invalid_IsKeyword",
@@ -1711,6 +1711,13 @@ func TestStmtCode(t *testing.T) {
 
 				is.True(variant.DeepEqual(s, variant.Int(12)), name)
 			},
+		},
+		{
+			Name: "Stmt_Func_Recursion_NotAllowed",
+			Input: `
+				b = (|| => b())()
+			`,
+			IsCompileError: true,
 		},
 	}
 

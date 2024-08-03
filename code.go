@@ -317,12 +317,15 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 			return nil, fmt.Errorf("bad variable: name %s is keyword", name)
 		}
 
-		scope, reg := c.exprGen.vars.Register(name)
+		scope, reg, ok := c.exprGen.vars.LookupRegister(name)
+		if !ok {
+			return nil, fmt.Errorf("variable %s not defined", name)
+		}
 
 		eval = evaler(func() (variant.Iface, error) {
 			v, ok := scope.GetVar(reg)
 			if !ok {
-				return nil, fmt.Errorf("variable %s not defined", name)
+				panic("unreachable")
 			}
 
 			return v, nil
@@ -332,7 +335,7 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("bad operand: %w", err)
+		return nil, err
 	}
 
 	if eval == nil {
@@ -852,7 +855,7 @@ func evalBinary(op string, lval, rval variant.Iface) (variant.Iface, error) {
 
 	if op == "+" && rval.Type() == variant.TypeArray && lval.Type() == variant.TypeArray {
 		rs, ls := variant.MustCast[*variant.Array](rval), variant.MustCast[*variant.Array](lval)
-		return rs.Concat(ls), nil
+		return ls.Concat(rs), nil
 	}
 
 	if lexer.IsCmpOp(op) {
@@ -1093,7 +1096,7 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 			return nil, err
 		}
 	} else {
-		if _, ok := c.exprGen.vars.LookupRegister(name); !ok {
+		if _, _, ok := c.exprGen.vars.LookupRegister(name); !ok {
 			if node.AugmentedOp != nil {
 				return nil, fmt.Errorf("name '%s' is not defined", name)
 			}
@@ -1285,15 +1288,10 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		return nil, fmt.Errorf("bad for statement: invalid collection expression")
 	}
 
-	blkVars := c.vars.WithScope()
-	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars, isLoopScope: true}).CodeGen(&node.Block)
-	if err != nil {
-		return nil, fmt.Errorf("bad for statement: invalid block statement: %w", err)
-	}
-
 	iterArr := func(i int, el variant.Iface) {}
 	iterObj := func(k variant.Iface, el variant.Iface) {}
 
+	blkVars := c.vars.WithScope()
 	scope := blkVars.LastScope()
 	switch len(varnames.X) {
 	case 0:
@@ -1318,6 +1316,11 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		}
 	default:
 		panic("unreachable")
+	}
+
+	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars, isLoopScope: true}).CodeGen(&node.Block)
+	if err != nil {
+		return nil, fmt.Errorf("bad for statement: invalid block statement: %w", err)
 	}
 
 	return invoker(func() error {
