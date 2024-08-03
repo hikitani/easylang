@@ -193,6 +193,30 @@ func iterSelect(nextFn *variant.Func) variant.Iface {
 	})
 }
 
+func iterCount(nextFn *variant.Func) variant.Iface {
+	return variant.NewFunc([]string{}, func(args variant.Args) (variant.Iface, error) {
+		if len(args) != 0 {
+			return nil, errors.New("count() takes no arguments")
+		}
+
+		cnt := variant.Int(0)
+		for {
+			_, err := nextFn.Call(nil)
+			if errors.Is(err, ErrStopIteration) {
+				break
+			}
+
+			if err != nil {
+				return nil, err
+			}
+
+			cnt.Add(variant.Int(1))
+		}
+
+		return cnt, nil
+	})
+}
+
 func iterObject(nextV *variant.Func) *variant.Object {
 	return variant.MustNewObject(
 		[]variant.Iface{
@@ -200,12 +224,14 @@ func iterObject(nextV *variant.Func) *variant.Object {
 			variant.NewString("max"),
 			variant.NewString("where"),
 			variant.NewString("select"),
+			variant.NewString("count"),
 		},
 		[]variant.Iface{
 			iterList(nextV),
 			iterMax(nextV),
 			iterWhere(nextV),
 			iterSelect(nextV),
+			iterCount(nextV),
 		},
 	)
 }
