@@ -223,15 +223,17 @@ func (vars *Vars) Published() *variant.Object {
 	return variant.MustNewObject(keys, vals)
 }
 
-func (vars *Vars) LookupRegister(name string) (Register, bool) {
-	for _, scope := range vars.Locals {
+func (vars *Vars) LookupRegister(name string) (*VarScope, Register, bool) {
+	for i := len(vars.Locals) - 1; i >= 0; i-- {
+		scope := vars.Locals[i]
 		r, ok := scope.LookupRegister(name)
 		if ok {
-			return r, ok
+			return scope, r, ok
 		}
 	}
 
-	return vars.Global.LookupRegister(name)
+	r, ok := vars.Global.LookupRegister(name)
+	return vars.Global, r, ok
 }
 
 func NewVars() *Vars {
