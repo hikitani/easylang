@@ -804,11 +804,13 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 	}
 
 	stackCap := (len(ops) + 1) / 2
-	return evaler(func() (variant.Iface, error) {
-		evalMask := make([]bool, len(evals))
 		stack := make([]variant.Iface, 0, stackCap)
-
+	evalMask := make([]bool, len(evals))
 		var leval, reval ExprEvaler
+	return evaler(func() (variant.Iface, error) {
+		clear(evalMask)
+		stack = stack[:0]
+
 		for _, opinfo := range ops {
 			i := opinfo.origPos
 			if !evalMask[i] {
