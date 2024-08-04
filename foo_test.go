@@ -9,7 +9,9 @@ import (
 
 func TestFoo(t *testing.T) {
 	vm := New()
-	stmt, err := vm.Compile(strings.NewReader(`
+	stmt, err := vm.Compile("", strings.NewReader(`
+		using iter
+
 		res = iter.
 			range(10, 100, 3).
 			where(|v| => v % 2 == 0).
@@ -21,8 +23,11 @@ func TestFoo(t *testing.T) {
 
 		obj = {
 			"arr": res,
+			"cnt": iter.range(100).count()
 		}
-		println(obj.arr)
+		println(obj.cnt)
+
+		print((import "bar.ela").s)
 	`))
 	require.NoError(t, err)
 

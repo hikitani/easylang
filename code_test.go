@@ -1,11 +1,14 @@
 package easylang
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
+	"testing/fstest"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/hikitani/easylang/lexer"
+	"github.com/hikitani/easylang/packages/registry"
 	"github.com/hikitani/easylang/variant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +20,153 @@ func mustFloat(v string) *big.Float {
 		panic(err)
 	}
 	return r
+}
+
+func expectGlobalVarOf[T variant.Iface](name string, expected T) func(name string, is *assert.Assertions, vars *Vars) {
+	return func(testName string, is *assert.Assertions, vars *Vars) {
+		r, ok := vars.Global.LookupRegister(name)
+		if !ok {
+			is.Failf("register not found", "test: %s, variable: %s", testName, name)
+			return
+		}
+
+		v, ok := vars.Global.GetVar(r)
+		if !ok {
+			is.Failf("variable not found", "test: %s, variable: %s", testName, name)
+			return
+		}
+
+		s, ok := v.(T)
+		if !ok {
+			is.Failf(
+				"variable does not match the expected type",
+				"test: %s, expected: %T, got: %T, ", testName, expected, v,
+			)
+			return
+		}
+
+		is.Truef(
+			variant.DeepEqual(s, expected),
+			"test: %s, expected: %s, got: %s", testName, expected, s,
+		)
+	}
+}
+
+func TestExprCode_Import(t *testing.T) {
+	parser, err := participle.Build[ImportExpr](
+		participle.Lexer(lexer.Definition()),
+		participle.Elide("Comment", "Whitespace"),
+	)
+	require.NoError(t, err)
+
+	node, err := parser.ParseString("", `import "foo/bar"`)
+	require.NoError(t, err)
+
+	importExprGen := &ImportExprCodeGen{exprGen: &ExprCodeGen{
+		vars:     NewDebugVars(),
+		register: registry.New(),
+		imports: importsInfo{
+			From: fstest.MapFS{
+				"foo/bar": &fstest.MapFile{
+					Data: []byte(`
+						pub name = "john"
+						pub age = 29
+					`),
+				},
+			},
+			ImportedPaths: map[string]struct{}{},
+		},
+	}}
+	eval, err := importExprGen.CodeGen(node)
+	require.NoError(t, err)
+
+	val, err := eval.Eval()
+	require.NoError(t, err)
+
+	expected := variant.FromMap(map[string]variant.Iface{
+		"name": variant.NewString("john"),
+		"age":  variant.Int(29),
+	})
+	assert.Truef(t, variant.DeepEqual(val, expected), "expected: %s, got: %s", expected, val)
+}
+
+func TestExprCode_Import_NotFound(t *testing.T) {
+	parser, err := participle.Build[ImportExpr](
+		participle.Lexer(lexer.Definition()),
+		participle.Elide("Comment", "Whitespace"),
+	)
+	require.NoError(t, err)
+
+	node, err := parser.ParseString("", `import "foo/bar"`)
+	require.NoError(t, err)
+
+	importExprGen := &ImportExprCodeGen{exprGen: &ExprCodeGen{
+		vars:     NewDebugVars(),
+		register: registry.New(),
+		imports: importsInfo{
+			From:          fstest.MapFS{},
+			ImportedPaths: map[string]struct{}{},
+		},
+	}}
+	eval, err := importExprGen.CodeGen(node)
+	assert.Error(t, err)
+	assert.Nil(t, eval)
+}
+
+func TestExprCode_Import_Invalid(t *testing.T) {
+	parser, err := participle.Build[ImportExpr](
+		participle.Lexer(lexer.Definition()),
+		participle.Elide("Comment", "Whitespace"),
+	)
+	require.NoError(t, err)
+
+	node, err := parser.ParseString("", `import "foo/../bar"`)
+	require.NoError(t, err)
+
+	importExprGen := &ImportExprCodeGen{exprGen: &ExprCodeGen{
+		vars:     NewDebugVars(),
+		register: registry.New(),
+		imports: importsInfo{
+			From:          fstest.MapFS{},
+			ImportedPaths: map[string]struct{}{},
+		},
+	}}
+	eval, err := importExprGen.CodeGen(node)
+	assert.Error(t, err)
+	assert.Nil(t, eval)
+}
+
+func TestExprCode_Import_Cycle(t *testing.T) {
+	parser, err := participle.Build[ImportExpr](
+		participle.Lexer(lexer.Definition()),
+		participle.Elide("Comment", "Whitespace"),
+	)
+	require.NoError(t, err)
+
+	node, err := parser.ParseString("", `import "foo/bar"`)
+	require.NoError(t, err)
+
+	importExprGen := &ImportExprCodeGen{exprGen: &ExprCodeGen{
+		vars:     NewDebugVars(),
+		register: registry.New(),
+		imports: importsInfo{
+			From: fstest.MapFS{
+				"foo/bar": &fstest.MapFile{Data: []byte(`
+					import "foo/foo"
+				`)},
+				"foo/foo": &fstest.MapFile{Data: []byte(`
+					import "foo/buz"
+				`)},
+				"foo/buz": &fstest.MapFile{Data: []byte(`
+					import "foo/bar"
+				`)},
+			},
+			ImportedPaths: map[string]struct{}{},
+		},
+	}}
+	eval, err := importExprGen.CodeGen(node)
+	assert.Error(t, err)
+	assert.Nil(t, eval)
 }
 
 func TestExprCode(t *testing.T) {
@@ -890,6 +1040,7 @@ func TestExprCode(t *testing.T) {
 			continue
 		}
 
+		fmt.Println(testCase.Name)
 		v, err := eval.Eval()
 		if testCase.IsRuntimeError {
 			assert.Error(t, err, testCase.Name)
@@ -921,29 +1072,9 @@ func TestStmtCode(t *testing.T) {
 		ExpectedVar    func(name string, is *assert.Assertions, vars *Vars)
 	}{
 		{
-			Name:  "Stmt_Assign",
-			Input: `foo = "hello"`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("foo")
-				if !ok {
-					is.Fail("register foo not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var foo not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.String)
-				if !ok {
-					is.Fail("var foo is not string", name)
-					return
-				}
-
-				is.Equal(s.String(), "hello")
-			},
+			Name:        "Stmt_Assign",
+			Input:       `foo = "hello"`,
+			ExpectedVar: expectGlobalVarOf("foo", variant.NewString("hello")),
 		},
 		{
 			Name: "Stmt_Assign_Augmented",
@@ -951,27 +1082,7 @@ func TestStmtCode(t *testing.T) {
 				foo = "hello"
 				foo += " world"
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("foo")
-				if !ok {
-					is.Fail("register foo not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var foo not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.String)
-				if !ok {
-					is.Fail("var foo is not string", name)
-					return
-				}
-
-				is.Equal(s.String(), "hello world")
-			},
+			ExpectedVar: expectGlobalVarOf("foo", variant.NewString("hello world")),
 		},
 		{
 			Name: "Stmt_Assign_Augmented_NameNotDefined",
@@ -1189,27 +1300,7 @@ func TestStmtCode(t *testing.T) {
 			a = block {
 				return "hello"
 			}`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("a")
-				if !ok {
-					is.Fail("register a not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var a not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.String)
-				if !ok {
-					is.Fail("var a is not string", name)
-					return
-				}
-
-				is.Equal(s.String(), "hello")
-			},
+			ExpectedVar: expectGlobalVarOf("a", variant.NewString("hello")),
 		},
 		{
 			Name: "Stmt_Return_Func",
@@ -1217,27 +1308,7 @@ func TestStmtCode(t *testing.T) {
 			a = || => {
 				return "hello"
 			}()`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("a")
-				if !ok {
-					is.Fail("register a not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var a not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.String)
-				if !ok {
-					is.Fail("var a is not string", name)
-					return
-				}
-
-				is.Equal(s.String(), "hello")
-			},
+			ExpectedVar: expectGlobalVarOf("a", variant.NewString("hello")),
 		},
 		{
 			Name:           "Stmt_Return_Invalid_Global",
@@ -1251,27 +1322,7 @@ func TestStmtCode(t *testing.T) {
 			while i < 10 {
 				i = i + 1
 			}`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("i")
-				if !ok {
-					is.Fail("register i not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var i not found", name)
-					return
-				}
-
-				i, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var i is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(i, variant.Int(10)))
-			},
+			ExpectedVar: expectGlobalVarOf("i", variant.Int(10)),
 		},
 		{
 			Name: "Stmt_While_Break",
@@ -1283,27 +1334,7 @@ func TestStmtCode(t *testing.T) {
 				}
 				i = i + 1
 			}`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("i")
-				if !ok {
-					is.Fail("register i not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var i not found", name)
-					return
-				}
-
-				i, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var i is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(i, variant.Int(10)))
-			},
+			ExpectedVar: expectGlobalVarOf("i", variant.Int(10)),
 		},
 		{
 			Name: "Stmt_While_Continue",
@@ -1319,27 +1350,7 @@ func TestStmtCode(t *testing.T) {
 
 				s = s + 1
 			}`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(5)))
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(5)),
 		},
 		{
 			Name: "Stmt_WhileNested_Break",
@@ -1353,27 +1364,7 @@ func TestStmtCode(t *testing.T) {
 				}
 				i = i + 1
 			}`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("j")
-				if !ok {
-					is.Fail("register j not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var j not found", name)
-					return
-				}
-
-				j, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var j is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(j, variant.Int(20)))
-			},
+			ExpectedVar: expectGlobalVarOf("j", variant.Int(20)),
 		},
 		{
 			Name: "Stmt_For_Array_ByVal",
@@ -1383,27 +1374,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(6)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(6)),
 		},
 		{
 			Name: "Stmt_For_Array_ByValWithIdx",
@@ -1413,27 +1384,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(6)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(6)),
 		},
 		{
 			Name: "Stmt_For_Array_ByIdx",
@@ -1444,27 +1395,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + arr[i]
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(6)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(6)),
 		},
 		{
 			Name: "Stmt_For_Array_Bytes",
@@ -1480,27 +1411,7 @@ func TestStmtCode(t *testing.T) {
 				vars.Global.DefineVar(arrReg, variant.Bytes(arr))
 				return nil
 			},
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(6)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(6)),
 		},
 		{
 			Name: "Stmt_For_Object_ByKey",
@@ -1515,27 +1426,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + obj[k]
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(6)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(6)),
 		},
 		{
 			Name: "Stmt_For_Object_ByVal",
@@ -1550,27 +1441,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(6)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(6)),
 		},
 		{
 			Name: "Stmt_For_Continue",
@@ -1583,27 +1454,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(4)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(4)),
 		},
 		{
 			Name: "Stmt_For_Break",
@@ -1616,27 +1467,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(1)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(1)),
 		},
 		{
 			Name: "Stmt_ForNested_Break",
@@ -1653,27 +1484,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(12)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(12)),
 		},
 		{
 			Name: "Stmt_ForNested_Continue",
@@ -1690,27 +1501,7 @@ func TestStmtCode(t *testing.T) {
 				s = s + v
 			}
 			`,
-			ExpectedVar: func(name string, is *assert.Assertions, vars *Vars) {
-				r, ok := vars.Global.LookupRegister("s")
-				if !ok {
-					is.Fail("register s not found", name)
-					return
-				}
-
-				v, ok := vars.Global.GetVar(r)
-				if !ok {
-					is.Fail("var s not found", name)
-					return
-				}
-
-				s, ok := v.(*variant.Num)
-				if !ok {
-					is.Fail("var s is not num", name)
-					return
-				}
-
-				is.True(variant.DeepEqual(s, variant.Int(12)), name)
-			},
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(12)),
 		},
 		{
 			Name: "Stmt_Func_Recursion_NotAllowed",
@@ -1719,9 +1510,135 @@ func TestStmtCode(t *testing.T) {
 			`,
 			IsCompileError: true,
 		},
+		{
+			Name: "Stmt_Using",
+			Input: `
+				using iter
+				s = iter.range(100).count()
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Alias",
+			Input: `
+				using iter as foo
+				s = foo.range(100).count()
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_Block",
+			Input: `
+				s = 0
+				block {
+					using iter
+					s = iter.range(100).count()
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_Func",
+			Input: `
+				s = 0
+				(|| => {
+					using iter
+					s = iter.range(100).count()
+				})()
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_If",
+			Input: `
+				s = 0
+				if s == 0 {
+					using iter
+					s = iter.range(100).count()
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_IfElseIf",
+			Input: `
+				s = 0
+				if s == 1 {
+					s = -1
+				} else if s == 0 {
+					using iter
+					s = iter.range(100).count()
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_IfElseIfElse",
+			Input: `
+				s = 0
+				if s == 1 {
+					s = -1
+				} else if s == -1 {
+					s = -2
+				} else {
+					using iter
+					s = iter.range(100).count()
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_For",
+			Input: `
+				s = 0
+				for el in [1, 2, 3] {
+					using iter
+					s = iter.range(100).count()
+					break
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_While",
+			Input: `
+				s = 0
+				while s == 0 {
+					using iter
+					s = iter.range(100).count()
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_FoundInternalScope",
+			Input: `
+				using iter
+
+				s = 0
+				block {
+					s = iter.range(100).count()
+				}
+			`,
+			ExpectedVar: expectGlobalVarOf("s", variant.Int(100)),
+		},
+		{
+			Name: "Stmt_Using_Nested_NotFoundOutScope",
+			Input: `
+				s = 0
+				block {
+					using iter
+					s = iter.range(100).count()
+				}
+
+				iter.range(100)
+			`,
+			IsCompileError: true,
+		},
 	}
 
 	is := assert.New(t)
+	register := registry.New()
 	for _, testCase := range tests {
 		stmt, err := parser.ParseString("", testCase.Input)
 		if err != nil {
@@ -1737,7 +1654,7 @@ func TestStmtCode(t *testing.T) {
 			}
 		}
 
-		invoker, err := (&Program{vars: vars}).CodeGen(stmt)
+		invoker, err := (&Program{vars: vars, register: register}).CodeGen(stmt)
 		if testCase.IsCompileError {
 			assert.Error(t, err, testCase.Name)
 			continue

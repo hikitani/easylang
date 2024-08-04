@@ -94,6 +94,7 @@ type Operand struct {
 	Node
 	Block     *BlockExpr   `( @@`
 	Func      *FuncExpr    `| @@`
+	Import    *ImportExpr  `| @@`
 	Literal   *Literal     `| @@`
 	Name      *Ident       `| @@`
 	ParenExpr *Expr        `| "(" EOL* @@ EOL* ")" )`
@@ -110,6 +111,11 @@ type FuncExpr struct {
 	Args  *List[Ident] `"|" EOL* @@? EOL* "|" FuncSign`
 	Block *BlockStmt   `( @@`
 	Expr  *Expr        `| @@ )`
+}
+
+type ImportExpr struct {
+	Node
+	Path string `"import" @String`
 }
 
 type SelectorExpr struct {
@@ -144,6 +150,7 @@ type Stmt struct {
 	Return   *ReturnStmt   `| @@`
 	Continue *ContinueStmt `| @@`
 	Break    *BreakStmt    `| @@`
+	Using    *UsingStmt    `| @@`
 	Expr     *ExprStmt     `| @@ )`
 }
 
@@ -194,6 +201,12 @@ type ContinueStmt struct {
 type BreakStmt struct {
 	Node
 	Key struct{} `"break"`
+}
+
+type UsingStmt struct {
+	Node
+	Name  Ident  `"using" @@`
+	Alias *Ident `("as" @@)?`
 }
 
 type ProgramFile struct {

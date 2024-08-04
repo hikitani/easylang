@@ -129,7 +129,7 @@ func IsPredicateOp(op string) bool {
 
 func IsKeyword(s string) bool {
 	switch s {
-	case "if", "else", "for", "in", "while",
+	case "if", "else", "for", "in", "while", "using", "import",
 		"return", "break", "continue", "block", "pub":
 		return true
 	}

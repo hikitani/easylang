@@ -297,6 +297,12 @@ func TestExpr(t *testing.T) {
 			}}}},
 		},
 		{
+			Code: `import "./bar/foo.ela"`,
+			Expected: Expr{UnaryExpr: UnaryExpr{Operand: Operand{Import: &ImportExpr{
+				Path: `"./bar/foo.ela"`,
+			}}}},
+		},
+		{
 			Code:      `()`,
 			IsInvalid: true,
 		},
@@ -617,6 +623,13 @@ func TestStmt(t *testing.T) {
 					},
 				},
 			}},
+		},
+		{
+			Code: `using iter as it`,
+			Expected: ProgramFile{List: &[]*Stmt{&Stmt{Using: &UsingStmt{
+				Name:  Ident{Name: "iter"},
+				Alias: &Ident{Name: "it"},
+			}}}},
 		},
 	}
 

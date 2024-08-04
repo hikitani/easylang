@@ -3,11 +3,11 @@ package easylang
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/hikitani/easylang/lexer"
 	"github.com/hikitani/easylang/packages/registry"
-	"github.com/hikitani/easylang/variant"
 )
 
 var parser = participle.MustBuild[ProgramFile](
@@ -21,31 +21,20 @@ type Machine struct {
 	register *registry.Registry
 }
 
-func (m *Machine) Compile(f io.Reader) (StmtInvoker, error) {
-	builtinPkg, ok := m.register.Get("builtin")
-	if !ok {
-		panic("builtin package not found")
-	}
-
-	for name, obj := range builtinPkg.Objects() {
-		r := m.vars.Global.Register(name)
-		m.vars.Global.DefineVar(r, obj)
-	}
-
-	iterPkg, ok := m.register.Get("iter")
-	if !ok {
-		panic("iter package not found")
-	}
-
-	iterReg := m.vars.Global.Register("iter")
-	m.vars.Global.DefineVar(iterReg, variant.FromMap(iterPkg.Objects()))
-
-	ast, err := m.parser.Parse("", f)
+func (m *Machine) Compile(filename string, f io.Reader) (StmtInvoker, error) {
+	ast, err := m.parser.Parse(filename, f)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 
-	invoker, err := (&Program{vars: m.vars}).CodeGen(ast)
+	invoker, err := (&Program{
+		vars:     m.vars,
+		register: m.register,
+		imports: importsInfo{
+			From:          os.DirFS("./"),
+			ImportedPaths: map[string]struct{}{},
+		},
+	}).CodeGen(ast)
 	if err != nil {
 		return nil, fmt.Errorf("code gen: %w", err)
 	}

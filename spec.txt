@@ -22,8 +22,11 @@ int_lit = decimal_lit | binary_lit | octal_lit | hex_lit .
 
 expressions
 
-operand = literal | ident | "(" expr ")" .
+operand = block_expr | func | import | literal | ident | "(" expr ")" .
 literal = basic_lit | composite_lit .
+block_expr = "block" block .
+func = "|" [ ident_list ] "|" => ( block | expr )
+import = "import" string_lit
 
 basic_lit = int_lit | string_lit .
 composite_lit = array_lit | obj_lit .
@@ -52,10 +55,11 @@ args = "(" expr_list ")" .
 
 statements
 
-stmt = expr | if_stmt | for_stmt | while_stmt | block | assign_stmt .
+stmt = expr | if_stmt | for_stmt | while_stmt | using_stmt | block | assign_stmt .
 stmt_list = { stmt newline } .
 block = "{" stmt_list "}" .
 if_stmt = "if" expr block [ "else" ( if_stmt | block ) ] .
 for_stmt = "for" ident_list "in" expr block .
 while_stmt = "while" expr block .
+using_stmt = "using" ident [ "as" ident ] .
 assign_stmt = ["pub"] expr_list [ add_op | mul_op ] "=" expr_list .

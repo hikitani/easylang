@@ -3,13 +3,18 @@ package easylang
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/hikitani/easylang/lexer"
+	"github.com/hikitani/easylang/packages/registry"
 	"github.com/hikitani/easylang/variant"
+	"golang.org/x/mod/module"
 )
 
 var (
@@ -266,15 +271,26 @@ func (c *OperandCodeGen) CodeGen(node *Operand) (eval ExprEvaler, err error) {
 		vars := c.exprGen.vars.WithScope()
 		vars.ParentBlockScope = vars.LastScope()
 		eval, err = (&FuncExprCodeGen{
-			exprGen: &ExprCodeGen{vars: vars},
-			blkGen:  &BlockStmtCodeGen{vars: vars},
+			exprGen: &ExprCodeGen{
+				vars:     vars,
+				register: c.exprGen.register,
+				imports:  c.exprGen.imports,
+			},
 		}).CodeGen(node.Func)
 	case node.Block != nil:
 		vars := c.exprGen.vars.WithScope()
 		vars.ParentBlockScope = vars.LastScope()
 		eval, err = (&BlockExprCodeGen{
-			blkGen: &BlockStmtCodeGen{vars: vars},
+			exprGen: &ExprCodeGen{
+				vars:     vars,
+				register: c.exprGen.register,
+				imports:  c.exprGen.imports,
+			},
 		}).CodeGen(node.Block)
+	case node.Import != nil:
+		eval, err = (&ImportExprCodeGen{
+			exprGen: c.exprGen,
+		}).CodeGen(node.Import)
 	case node.Literal != nil:
 		lit := node.Literal
 		switch {
@@ -622,7 +638,6 @@ func (c *UnaryExprCodeGen) CodeGen(node *UnaryExpr) (ExprEvaler, error) {
 
 type FuncExprCodeGen struct {
 	exprGen *ExprCodeGen
-	blkGen  *BlockStmtCodeGen
 }
 
 func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
@@ -695,10 +710,10 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 			}), nil
 		}), nil
 	case node.Block != nil:
-		vars := c.blkGen.vars
+		vars := c.exprGen.vars
 		prefn := prefngen(regs(vars))
 
-		invoker, err := c.blkGen.CodeGen(node.Block)
+		invoker, err := (&BlockStmtCodeGen{exprGen: c.exprGen}).CodeGen(node.Block)
 		if err != nil {
 			return nil, fmt.Errorf("bad function: invalid block statement: %w", err)
 		}
@@ -723,13 +738,13 @@ func (c *FuncExprCodeGen) CodeGen(node *FuncExpr) (ExprEvaler, error) {
 }
 
 type BlockExprCodeGen struct {
-	blkGen *BlockStmtCodeGen
+	exprGen *ExprCodeGen
 }
 
 func (c *BlockExprCodeGen) CodeGen(node *BlockExpr) (ExprEvaler, error) {
-	vars := c.blkGen.vars
+	vars := c.exprGen.vars
 
-	invoker, err := c.blkGen.CodeGen(&node.Block)
+	invoker, err := (&BlockStmtCodeGen{exprGen: c.exprGen}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("bad block expression: invalid block statement: %w", err)
 	}
@@ -744,8 +759,89 @@ func (c *BlockExprCodeGen) CodeGen(node *BlockExpr) (ExprEvaler, error) {
 	}), nil
 }
 
+type importsInfo struct {
+	From          fs.FS
+	ImportedPaths map[string]struct{}
+}
+
+type ImportExprCodeGen struct {
+	exprGen *ExprCodeGen
+}
+
+func (c *ImportExprCodeGen) CodeGen(node *ImportExpr) (ExprEvaler, error) {
+	pathExpr, err := c.exprGen.CodeGen(&Expr{UnaryExpr: UnaryExpr{
+		Operand: Operand{Literal: &Literal{Basic: &BasicLit{String: &node.Path}}},
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %s", err)
+	}
+
+	pathVal, err := pathExpr.Eval()
+	if err != nil {
+		return nil, err
+	}
+
+	pathStr := variant.MustCast[*variant.String](pathVal).String()
+	if pathStr == "" {
+		return nil, errors.New("invalid path: must be non empty")
+	}
+
+	toCheck := filepath.FromSlash(pathStr)
+
+	if len(toCheck) >= 2 && toCheck[0] == '.' && toCheck[1] == os.PathSeparator {
+		toCheck = toCheck[2:]
+	}
+
+	if err := module.CheckFilePath(toCheck); err != nil {
+		return nil, fmt.Errorf("invalid path: %s", err)
+	}
+
+	imports := c.exprGen.imports
+	if _, ok := imports.ImportedPaths[toCheck]; ok {
+		return nil, errors.New("import cycle not allowed")
+	}
+	imports.ImportedPaths[toCheck] = struct{}{}
+
+	f, err := imports.From.Open(toCheck)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("file '%s' does not exist", pathStr)
+	} else if err != nil {
+		return nil, err
+	} else if s, err := f.Stat(); err != nil {
+		return nil, err
+	} else if !s.Mode().IsRegular() {
+		return nil, fmt.Errorf("path '%s' does not point to a file", pathStr)
+	}
+	defer f.Close()
+
+	ast, err := parser.Parse(filepath.Base(toCheck), f)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+
+	vars := NewVars()
+	invoker, err := (&Program{
+		vars:     vars,
+		register: c.exprGen.register,
+		imports:  c.exprGen.imports,
+	}).CodeGen(ast)
+	if err != nil {
+		return nil, fmt.Errorf("cannot import: %w", err)
+	}
+
+	return evaler(func() (variant.Iface, error) {
+		if err := invoker.Invoke(); err != nil {
+			return nil, fmt.Errorf("cannot import '%s': %w", pathStr, err)
+		}
+
+		return vars.Published(), nil
+	}), nil
+}
+
 type ExprCodeGen struct {
-	vars *Vars
+	vars     *Vars
+	register *registry.Registry
+	imports  importsInfo
 }
 
 func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
@@ -804,9 +900,9 @@ func (c *ExprCodeGen) CodeGen(node *Expr) (ExprEvaler, error) {
 	}
 
 	stackCap := (len(ops) + 1) / 2
-		stack := make([]variant.Iface, 0, stackCap)
+	stack := make([]variant.Iface, 0, stackCap)
 	evalMask := make([]bool, len(evals))
-		var leval, reval ExprEvaler
+	var leval, reval ExprEvaler
 	return evaler(func() (variant.Iface, error) {
 		clear(evalMask)
 		stack = stack[:0]
@@ -1010,12 +1106,12 @@ func (c *BreakStmtCodeGen) CodeGen(node *BreakStmt) (StmtInvoker, error) {
 }
 
 type ReturnStmtCodeGen struct {
-	vars *Vars
+	exprGen *ExprCodeGen
 }
 
 func (c *ReturnStmtCodeGen) CodeGen(node *ReturnStmt) (StmtInvoker, error) {
 	ret := func(v variant.Iface) error {
-		c.vars.SetReturn(v)
+		c.exprGen.vars.SetReturn(v)
 		return ErrStmtFinished
 	}
 	if node.ReturnExpr == nil {
@@ -1024,7 +1120,7 @@ func (c *ReturnStmtCodeGen) CodeGen(node *ReturnStmt) (StmtInvoker, error) {
 		}), nil
 	}
 
-	eval, err := (&ExprCodeGen{vars: c.vars}).CodeGen(node.ReturnExpr)
+	eval, err := c.exprGen.CodeGen(node.ReturnExpr)
 	if err != nil {
 		return nil, fmt.Errorf("bad return statement: %w", err)
 	}
@@ -1133,32 +1229,26 @@ func (c *ExprStmtCodeGen) CodeGen(node *ExprStmt) (StmtInvoker, error) {
 type StmtCodeGen struct {
 	isLoopScope   bool
 	isGlobalScope bool
-	vars          *Vars
+	exprGen       *ExprCodeGen
 }
 
 func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 	switch {
 	case node.If != nil:
 		invoker, err = (&IfStmtCodeGen{
+			exprGen:     c.exprGen,
 			isLoopScope: c.isLoopScope,
-			vars:        c.vars,
 		}).CodeGen(node.If)
 	case node.For != nil:
-		invoker, err = (&ForStmtCodeGen{
-			vars: c.vars,
-		}).CodeGen(node.For)
+		invoker, err = (&ForStmtCodeGen{exprGen: c.exprGen}).CodeGen(node.For)
 	case node.While != nil:
-		invoker, err = (&WhileStmtCodeGen{
-			vars: c.vars,
-		}).CodeGen(node.While)
+		invoker, err = (&WhileStmtCodeGen{exprGen: c.exprGen}).CodeGen(node.While)
 	case node.Return != nil:
 		if c.isGlobalScope {
 			return nil, errors.New("return statement cannot be used in global scope")
 		}
 
-		invoker, err = (&ReturnStmtCodeGen{
-			vars: c.vars,
-		}).CodeGen(node.Return)
+		invoker, err = (&ReturnStmtCodeGen{exprGen: c.exprGen}).CodeGen(node.Return)
 	case node.Continue != nil:
 		if !c.isLoopScope {
 			return nil, errors.New("continue statement cannot be used outside of a loop")
@@ -1171,10 +1261,12 @@ func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 		}
 
 		invoker, err = (&BreakStmtCodeGen{}).CodeGen(node.Break)
+	case node.Using != nil:
+		invoker, err = (&UsingStmtCodeGen{exprGen: c.exprGen}).CodeGen(node.Using)
 	case node.Expr != nil:
 		invoker, err = (&ExprStmtCodeGen{
 			isGlobalScope: c.isGlobalScope,
-			exprGen:       &ExprCodeGen{vars: c.vars},
+			exprGen:       c.exprGen,
 		}).CodeGen(node.Expr)
 	default:
 		return nil, fmt.Errorf("statement not defined (expected if, for, while, assignment, return or expr statement)")
@@ -1184,7 +1276,7 @@ func (c StmtCodeGen) CodeGen(node *Stmt) (invoker StmtInvoker, err error) {
 }
 
 type BlockStmtCodeGen struct {
-	vars        *Vars
+	exprGen     *ExprCodeGen
 	isLoopScope bool
 }
 
@@ -1200,7 +1292,10 @@ func (c *BlockStmtCodeGen) CodeGen(node *BlockStmt) (StmtInvoker, error) {
 			return nil, errors.New("bad block statement")
 		}
 
-		invoker, err := (&StmtCodeGen{vars: c.vars, isLoopScope: c.isLoopScope}).CodeGen(stmt)
+		invoker, err := (&StmtCodeGen{
+			exprGen:     c.exprGen,
+			isLoopScope: c.isLoopScope,
+		}).CodeGen(stmt)
 		if err != nil {
 			return nil, fmt.Errorf("bad statement: %w", err)
 		}
@@ -1220,18 +1315,22 @@ func (c *BlockStmtCodeGen) CodeGen(node *BlockStmt) (StmtInvoker, error) {
 }
 
 type WhileStmtCodeGen struct {
-	vars *Vars
+	exprGen *ExprCodeGen
 }
 
 func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
-	condEval, err := (&ExprCodeGen{vars: c.vars}).CodeGen(&node.Cond)
+	condEval, err := c.exprGen.CodeGen(&node.Cond)
 	if err != nil {
 		return nil, fmt.Errorf("invalid while condition expression: %w", err)
 	}
 
-	vars := c.vars.WithScope()
+	vars := c.exprGen.vars.WithScope()
 	blkInvoker, err := (&BlockStmtCodeGen{
-		vars:        vars,
+		exprGen: &ExprCodeGen{
+			vars:     vars,
+			register: c.exprGen.register,
+			imports:  c.exprGen.imports,
+		},
 		isLoopScope: true,
 	}).CodeGen(&node.Block)
 	if err != nil {
@@ -1272,7 +1371,7 @@ func (c *WhileStmtCodeGen) CodeGen(node *WhileStmt) (StmtInvoker, error) {
 }
 
 type ForStmtCodeGen struct {
-	vars *Vars
+	exprGen *ExprCodeGen
 }
 
 func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
@@ -1285,7 +1384,7 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		return nil, errors.New("bad for statement: expected 0, 1 or 2 variables")
 	}
 
-	overEval, err := (&ExprCodeGen{vars: c.vars}).CodeGen(&node.OverX)
+	overEval, err := c.exprGen.CodeGen(&node.OverX)
 	if err != nil {
 		return nil, fmt.Errorf("bad for statement: invalid collection expression")
 	}
@@ -1293,7 +1392,7 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 	iterArr := func(i int, el variant.Iface) {}
 	iterObj := func(k variant.Iface, el variant.Iface) {}
 
-	blkVars := c.vars.WithScope()
+	blkVars := c.exprGen.vars.WithScope()
 	scope := blkVars.LastScope()
 	switch len(varnames.X) {
 	case 0:
@@ -1320,7 +1419,14 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 		panic("unreachable")
 	}
 
-	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars, isLoopScope: true}).CodeGen(&node.Block)
+	blkInvoker, err := (&BlockStmtCodeGen{
+		exprGen: &ExprCodeGen{
+			vars:     blkVars,
+			register: c.exprGen.register,
+			imports:  c.exprGen.imports,
+		},
+		isLoopScope: true,
+	}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("bad for statement: invalid block statement: %w", err)
 	}
@@ -1405,18 +1511,24 @@ func (c *ForStmtCodeGen) CodeGen(node *ForStmt) (StmtInvoker, error) {
 }
 
 type IfStmtCodeGen struct {
+	exprGen     *ExprCodeGen
 	isLoopScope bool
-	vars        *Vars
 }
 
 func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
-	condEval, err := (&ExprCodeGen{vars: c.vars}).CodeGen(&node.Cond)
+	condEval, err := c.exprGen.CodeGen(&node.Cond)
 	if err != nil {
 		return nil, fmt.Errorf("bad if statement: invalid condition expression: %w", err)
 	}
 
-	blkVars := c.vars.WithScope()
-	blkInvoker, err := (&BlockStmtCodeGen{vars: blkVars, isLoopScope: c.isLoopScope}).CodeGen(&node.Block)
+	blkInvoker, err := (&BlockStmtCodeGen{
+		exprGen: &ExprCodeGen{
+			vars:     c.exprGen.vars.WithScope(),
+			register: c.exprGen.register,
+			imports:  c.exprGen.imports,
+		},
+		isLoopScope: c.isLoopScope,
+	}).CodeGen(&node.Block)
 	if err != nil {
 		return nil, fmt.Errorf("bad if statement: invalid block statement: %w", err)
 	}
@@ -1424,13 +1536,22 @@ func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
 	var elseBlkInvoker, nextIfInvoker StmtInvoker
 	switch {
 	case node.ElseBlock != nil:
-		elseBlkVars := c.vars.WithScope()
-		elseBlkInvoker, err = (&BlockStmtCodeGen{vars: elseBlkVars, isLoopScope: c.isLoopScope}).CodeGen(node.ElseBlock)
+		elseBlkInvoker, err = (&BlockStmtCodeGen{
+			exprGen: &ExprCodeGen{
+				vars:     c.exprGen.vars.WithScope(),
+				register: c.exprGen.register,
+				imports:  c.exprGen.imports,
+			},
+			isLoopScope: c.isLoopScope,
+		}).CodeGen(node.ElseBlock)
 		if err != nil {
 			return nil, fmt.Errorf("bad if statement: invalid else block statement: %w", err)
 		}
 	case node.ElseIf != nil:
-		nextIfInvoker, err = (&IfStmtCodeGen{vars: c.vars, isLoopScope: c.isLoopScope}).CodeGen(node.ElseIf)
+		nextIfInvoker, err = (&IfStmtCodeGen{
+			exprGen:     c.exprGen,
+			isLoopScope: c.isLoopScope,
+		}).CodeGen(node.ElseIf)
 		if err != nil {
 			return nil, fmt.Errorf("bad if statement: invalid else if block statement: %w", err)
 		}
@@ -1463,8 +1584,31 @@ func (c *IfStmtCodeGen) CodeGen(node *IfStmt) (StmtInvoker, error) {
 	}), nil
 }
 
+type UsingStmtCodeGen struct {
+	exprGen *ExprCodeGen
+}
+
+func (c *UsingStmtCodeGen) CodeGen(node *UsingStmt) (StmtInvoker, error) {
+	pkgname := node.Name.Name
+	alias := pkgname
+	if node.Alias != nil {
+		alias = node.Alias.Name
+	}
+
+	pkg, ok := c.exprGen.register.Get(pkgname)
+	if !ok {
+		return nil, fmt.Errorf("package '%s' not found", pkgname)
+	}
+
+	scope, reg := c.exprGen.vars.Register(alias)
+	scope.DefineVar(reg, variant.FromMap(pkg.Objects()))
+	return invoker(func() error { return nil }), nil
+}
+
 type Program struct {
-	vars *Vars
+	vars     *Vars
+	register *registry.Registry
+	imports  importsInfo
 }
 
 func (c *Program) CodeGen(node *ProgramFile) (StmtInvoker, error) {
@@ -1475,7 +1619,14 @@ func (c *Program) CodeGen(node *ProgramFile) (StmtInvoker, error) {
 
 	stmtInvokers := make([]StmtInvoker, 0, len(*stmts))
 	for _, stmt := range *stmts {
-		stmtInvoker, err := (&StmtCodeGen{vars: c.vars, isGlobalScope: true}).CodeGen(stmt)
+		stmtInvoker, err := (&StmtCodeGen{
+			exprGen: &ExprCodeGen{
+				vars:     c.vars,
+				register: c.register,
+				imports:  c.imports,
+			},
+			isGlobalScope: true,
+		}).CodeGen(stmt)
 		if err != nil {
 			return nil, err
 		}

@@ -3,6 +3,7 @@ package easylang
 import (
 	"fmt"
 
+	"github.com/hikitani/easylang/packages/builtin"
 	"github.com/hikitani/easylang/variant"
 )
 
@@ -48,14 +49,6 @@ func NewVarScope() *VarScope {
 		},
 		m: map[Register]variant.Iface{},
 	}
-}
-
-func (scope *VarScope) setter(name Register) (func(v variant.Iface), bool) {
-	if _, ok := scope.GetVar(name); ok {
-		return func(v variant.Iface) { scope.DefineVar(name, v) }, true
-	}
-
-	return nil, false
 }
 
 func (scope *VarScope) SetReturn(v variant.Iface) {
@@ -114,18 +107,6 @@ type Vars struct {
 
 	debug       bool
 	debugChilds []*Vars
-}
-
-func (vars *Vars) setter(name Register) (func(v variant.Iface), bool) {
-	for i := len(vars.Locals) - 1; i >= 0; i-- {
-		local := vars.Locals[i]
-
-		if setter, ok := local.setter(name); ok {
-			return setter, ok
-		}
-	}
-
-	return vars.Global.setter(name)
 }
 
 func (vars *Vars) WithScope() *Vars {
@@ -189,7 +170,8 @@ func (vars *Vars) Register(name string) (*VarScope, Register) {
 		return vars.Global, vars.Global.r.Register(name)
 	}
 
-	for _, scope := range vars.Locals {
+	for i := len(vars.Locals) - 1; i >= 0; i-- {
+		scope := vars.Locals[i]
 		r, ok := scope.LookupRegister(name)
 		if ok {
 			return scope, r
@@ -237,9 +219,16 @@ func (vars *Vars) LookupRegister(name string) (*VarScope, Register, bool) {
 }
 
 func NewVars() *Vars {
-	return &Vars{
+	vars := &Vars{
 		Global: NewVarScope(),
 	}
+
+	for name, obj := range builtin.Package.Objects() {
+		r := vars.Global.Register(name)
+		vars.Global.DefineVar(r, obj)
+	}
+
+	return vars
 }
 
 func NewDebugVars() *Vars {
